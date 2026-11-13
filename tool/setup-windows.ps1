@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Prepara um PC Windows para compilar o Mobiz POS e instalar na maquininha Stone.
 
@@ -57,7 +57,14 @@ function Get-Zip($url, $destination) {
     Invoke-WebRequest -Uri $url -OutFile $zip
     Write-Host "    extraindo em $destination"
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
-    Expand-Archive -Path $zip -DestinationPath $destination -Force
+    # O tar do Windows 10+ extrai o zip do Flutter em 1-2 min; o
+    # Expand-Archive do PowerShell 5.1 pode levar mais de 10.
+    if (Have tar) {
+        tar -xf $zip -C $destination
+        if ($LASTEXITCODE -ne 0) { throw "Falha ao extrair $zip" }
+    } else {
+        Expand-Archive -Path $zip -DestinationPath $destination -Force
+    }
     Remove-Item $zip
 }
 
@@ -145,9 +152,9 @@ Write-Host @"
 
 Próximos passos (abra um NOVO PowerShell para pegar o PATH):
   cd $ProjectDir
-  .\tool\build.ps1                  # gera o APK (build\app\outputs\flutter-apk\app-release.apk)
-  .\tool\deploy.ps1                 # instala na maquininha ligada por USB
-  .\tool\deploy.ps1 -Logs           # instala e mostra os logs
+  .\tool\maquininha.ps1             # Gertec/Positivo: acha a chave do fabricante, compila e instala
+  .\tool\build.ps1                  # só gera o APK (build\app\outputs\flutter-apk\app-release.apk)
+  .\tool\deploy.ps1 -Logs           # instala o último APK e mostra os logs
 
-Leia docs\stone.md antes de instalar na maquininha (assinatura de debug por fabricante).
+Detalhes em docs\stone.md.
 "@

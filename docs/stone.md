@@ -107,21 +107,27 @@ pagamento da Stone, não deste app.
 
 1. A maquininha de **debug** (marca d'água "debug"/"mockup") aceita `adb` por
    USB; a de produção tem a USB bloqueada.
-2. `tool/build.sh` (ou `.\tool\build.ps1`) e `tool/deploy.sh`
-   (`.\tool\deploy.ps1`).
-3. **Positivo e Gertec:** o APK de debug precisa ser assinado com a JKS do
-   fabricante que a Stone fornece (pasta no Drive, linkada nas páginas
-   "Processo de build com dispositivos Positivo/Gertec"). Crie
-   `android/key.properties` apontando para ela:
+2. **Gertec e Positivo** só aceitam, no terminal de debug, APK assinado com
+   a JKS do fabricante que a Stone fornece (pastas no Drive linkadas nas
+   páginas "Processo de build com dispositivos Gertec/Positivo"). A GPOS 730
+   é Gertec ("série 7"). Sunmi, Tectoy e Ingenico usam a chave de debug comum.
+3. No Windows, um comando faz tudo — acha a `.jks` e o arquivo de senhas em
+   `C:\projetos\chaves`, confere a chave, grava `android\key.properties`,
+   compila, instala e abre o app:
 
-   ```properties
-   storeFile=C:/caminho/para/a-jks-do-fabricante.jks
-   storePassword=…
-   keyAlias=…
-   keyPassword=…
+   ```powershell
+   .\tool\maquininha.ps1            # outra pasta: -Chaves D:\caminho
+   .\tool\maquininha.ps1 -VarianteDebug   # se o terminal recusar o build de release
    ```
 
-   Sunmi e Tectoy costumam aceitar o APK com a chave de debug comum.
+   Manualmente (ou no Linux): crie `android/key.properties` com `storeFile`,
+   `storePassword`, `keyAlias` e `keyPassword` da JKS do fabricante e rode
+   `tool/build.sh` + `tool/deploy.sh`. Com `signDebug=true` no arquivo, o
+   build de debug (`flutter run`) também sai assinado com ela.
+
+   Nenhuma credencial do painel da Stone entra no app: o Token PackageCloud é
+   do SDK (não usado), o StoneCode ativa o terminal nos apps da Stone e as
+   chaves `QRCode_*` são do Pix via SDK.
 4. O terminal precisa estar **ativado** com o StoneCode de teste (o serial é
    vinculado ao StoneCode por formulário; é 1:1).
 5. Logs: `tool/deploy.sh --logs` ou `adb logcat`. Para espelhar a tela, `scrcpy`.

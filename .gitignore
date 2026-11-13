@@ -48,7 +48,7 @@ app.*.map.json
 .widget_preview/
 
 # Assinatura e símbolos (nunca versionar a keystore)
-android/key.properties
+android/key.properties*
 *.jks
 *.keystore
 /build/symbols/

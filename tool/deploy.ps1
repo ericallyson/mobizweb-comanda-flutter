@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Instala o APK na maquininha de desenvolvimento ligada por USB e abre o app.
 

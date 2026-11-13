@@ -69,6 +69,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            // `signDebug=true` no key.properties (tool/maquininha.ps1 grava):
+            // assina também o build de DEBUG com a chave configurada — é o
+            // que os terminais de debug da Gertec/Positivo exigem.
+            if (hasReleaseKey && keystoreProperties.getProperty("signDebug") == "true") {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
             signingConfig = signingConfigs.getByName(if (hasReleaseKey) "release" else "debug")
             isMinifyEnabled = true

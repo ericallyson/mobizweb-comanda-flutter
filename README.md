@@ -100,6 +100,15 @@ tool/deploy.sh --logs  # idem, mostrando os logs
 
 No Windows: `.\tool\build.ps1`, `.\tool\deploy.ps1`, `.\tool\deploy.ps1 -Logs`.
 
+**Terminal de debug Gertec ou Positivo** (ex.: GPOS 730): eles só aceitam APK
+assinado com a chave do fabricante fornecida pela Stone. Com a `.jks` e o
+arquivo de senhas em `C:\projetos\chaves`, um comando configura a assinatura,
+compila, instala e abre o app:
+
+```powershell
+.\tool\maquininha.ps1
+```
+
 O APK sai em `build/app/outputs/flutter-apk/app-release.apk` (~14 MB; limite
 da Stone: 70 MB). Sem `android/key.properties` ele é assinado com a chave de
 debug — serve para a maquininha de desenvolvimento, não para homologar.

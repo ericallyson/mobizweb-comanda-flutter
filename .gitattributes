@@ -1,0 +1,4 @@
+# Scripts do Windows: CRLF e (no arquivo) UTF-8 com BOM. Sem o BOM o Windows
+# PowerShell 5.1 lê como ANSI e um travessão no texto vira aspas, quebrando o script.
+*.ps1 text eol=crlf
+*.sh  text eol=lf

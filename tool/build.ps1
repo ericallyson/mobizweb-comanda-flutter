@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Gera o APK de release para a maquininha Stone (Windows).
 
