@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:mobizweb_pos/app.dart';
 import 'package:mobizweb_pos/core/api.dart';
 import 'package:mobizweb_pos/core/storage.dart';
+import 'package:mobizweb_pos/print/receipt.dart';
 import 'package:mobizweb_pos/stone/stone_deeplink.dart';
 import 'package:mobizweb_pos/stores/payments.dart';
 
@@ -205,6 +206,54 @@ void main() {
       final t = await _boot(respond: (_) => _json(200, {}), backend: backend);
       expect(t.app.ledger.pending.single.state, 'unknown');
       expect(t.requests, isEmpty);
+    });
+  });
+
+  group('detecção da maquininha', () {
+    test('sem detectar os apps da Stone, cartão é só registrado; "Usar os apps da Stone" liga cobrança e impressão', () async {
+      final t = await _boot(respond: (_) => _json(200, {}));
+      t.app.terminal
+        ..stoneAvailable = false
+        ..printerAvailable = false;
+      expect(t.app.terminal.canCharge, isFalse);
+      expect(t.app.terminal.canPrint, isFalse);
+
+      t.app.settings.setForceStone(true);
+      expect(t.app.terminal.hasStone, isTrue);
+      expect(t.app.terminal.canCharge, isTrue);
+      expect(t.app.terminal.canPrint, isTrue);
+      expect(t.app.terminal.isDemo, isFalse);
+      // A escolha fica gravada no aparelho.
+      expect(t.backend.values['force_stone'], '1');
+
+      // Desligar "Cobrar na maquininha" continua valendo.
+      t.app.settings.setChargeOnTerminal(false);
+      expect(t.app.terminal.canCharge, isFalse);
+      expect(t.app.terminal.canPrint, isTrue);
+    });
+
+    test('forçado num aparelho SEM os apps: o erro é claro e nada fica pendente', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_channel, null);
+      final t = await _boot(respond: (_) => _json(200, {}));
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_channel, (call) async {
+        if (call.method == 'launch') throw PlatformException(code: 'unavailable');
+        return null;
+      });
+      t.app.terminal.stoneAvailable = false;
+      t.app.settings.setForceStone(true);
+      final outcome = await t.app.ledger.chargeAndRecord(
+        kind: 'session',
+        targetId: 's',
+        label: 'Mesa 1',
+        method: 'credit_card',
+        amount: 10,
+        type: StoneTransactionType.credit,
+      );
+      expect(outcome.status, ChargeStatus.declined);
+      expect(outcome.message, contains('não encontrado'));
+      expect(t.app.ledger.pending, isEmpty);
+      t.app.settings.setPrintAsText(true);
+      expect(await t.app.terminal.printLines(const [PText('teste')]), contains('não encontrado'));
     });
   });
 

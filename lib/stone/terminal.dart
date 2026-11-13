@@ -16,10 +16,18 @@ class Terminal {
   final Native _native;
   final Settings _settings;
 
-  /// Os apps da Stone existem neste aparelho?
+  /// O que a detecção automática achou neste aparelho. Pode dar falso
+  /// negativo (o Android 11+ esconde de um app a existência de outros), por
+  /// isso o que vale para o resto do app são [hasStone] e [hasPrinter].
   bool stoneAvailable = false;
   bool printerAvailable = false;
   String deviceLabel = '';
+
+  /// Há app de pagamento da Stone (detectado, ou o operador mandou usar)?
+  bool get hasStone => stoneAvailable || _settings.forceStone;
+
+  /// Há app de impressão da Stone (detectado, ou o operador mandou usar)?
+  bool get hasPrinter => printerAvailable || _settings.forceStone;
 
   /// Modo demonstração: mostra o que iria para o papel.
   Future<void> Function(List<Uint8List> pngs)? onPreview;
@@ -31,15 +39,15 @@ class Terminal {
     deviceLabel = [info['manufacturer'], info['model']].where((e) => e != null && '$e'.isNotEmpty).join(' ');
   }
 
-  bool get _demo => !stoneAvailable && _settings.demoMode;
+  bool get _demo => !hasStone && _settings.demoMode;
 
   /// Simulando a maquininha (aparelho sem Stone + modo demonstração)?
   bool get isDemo => _demo;
 
   /// Cartão/Pix devem ser cobrados aqui antes de registrar o pagamento?
-  bool get canCharge => _settings.chargeOnTerminal && (stoneAvailable || _demo);
+  bool get canCharge => _settings.chargeOnTerminal && (hasStone || _demo);
 
-  bool get canPrint => printerAvailable || _demo;
+  bool get canPrint => hasPrinter || _demo;
 
   /// Abre o app de pagamento da Stone e devolve o resultado da transação.
   /// `code == 'abandoned'`: o operador cancelou a espera sem resposta — o
@@ -53,7 +61,7 @@ class Terminal {
     try {
       final raw = await _launch(uri);
       if (raw == null) {
-        return const StonePaymentResult(approved: false, code: '?', message: 'Aplicativo da Stone indisponível.');
+        return const StonePaymentResult(approved: false, code: '?', message: 'App de pagamento da Stone não encontrado neste aparelho.');
       }
       return parsePaymentReturn(raw);
     } on _Abandoned {
@@ -84,7 +92,7 @@ class Terminal {
       final raw = await _launch(
         buildReprintUri(atk: atk, returnScheme: Config.returnScheme, customerCopy: customerCopy),
       );
-      return raw == null ? 'Aplicativo da Stone indisponível.' : parsePrintReturn(raw);
+      return raw == null ? 'App de impressão da Stone não encontrado neste aparelho.' : parsePrintReturn(raw);
     } on _Abandoned {
       return 'Sem resposta da impressora.';
     }
@@ -107,7 +115,7 @@ class Terminal {
     try {
       for (final content in calls) {
         final raw = await _launch(buildPrintUri(content: content, returnScheme: Config.returnScheme));
-        if (raw == null) return 'Aplicativo de impressão da Stone indisponível.';
+        if (raw == null) return 'App de impressão da Stone não encontrado neste aparelho.';
         final error = parsePrintReturn(raw);
         if (error != null) return error;
       }

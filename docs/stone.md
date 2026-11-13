@@ -131,6 +131,12 @@ pagamento da Stone, não deste app.
 4. O terminal precisa estar **ativado** com o StoneCode de teste (o serial é
    vinculado ao StoneCode por formulário; é 1:1).
 5. Logs: `tool/deploy.sh --logs` ou `adb logcat`. Para espelhar a tela, `scrcpy`.
+   `.\tool\maquininha.ps1 -Diagnostico` mostra o Android do terminal, os apps
+   da Stone instalados e quem atende cada deeplink.
+   Se o app disser que os apps da Stone não foram detectados num terminal
+   Stone, ligue **Configurações › Maquininha › Usar os apps da Stone** (o
+   Android 11+ pode esconder de um app a existência de outros; abrir o
+   deeplink funciona mesmo assim).
 6. No sandbox os **centavos** definem a resposta: `x,00` aprova, `x,51` dá
    "Não autorizada", `x,55` senha inválida. Voucher não é testável em sandbox.
 

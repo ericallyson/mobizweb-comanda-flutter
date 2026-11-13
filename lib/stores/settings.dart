@@ -18,6 +18,7 @@ class Settings extends ChangeNotifier {
     _printAsText = _store.getBool('print_as_text', false);
     _chargeOnTerminal = _store.getBool('charge_on_terminal', true);
     _demoMode = _store.getBool('demo_mode', false);
+    _forceStone = _store.getBool('force_stone', false);
   }
 
   final LocalStore _store;
@@ -32,6 +33,7 @@ class Settings extends ChangeNotifier {
   late bool _printAsText;
   late bool _chargeOnTerminal;
   late bool _demoMode;
+  late bool _forceStone;
 
   /// O que o operador digitou ("minhaloja" ou o domínio completo).
   String get serverInput => _serverInput;
@@ -65,6 +67,10 @@ class Settings extends ChangeNotifier {
   /// Simula maquininha e impressora em aparelho SEM os apps da Stone.
   bool get demoMode => _demoMode;
 
+  /// Usa os apps da Stone mesmo que a detecção automática não os encontre
+  /// (o Android pode esconder de um app a existência de outro).
+  bool get forceStone => _forceStone;
+
   void setServerInput(String v) => _set(() => _serverInput = v.trim(), () => _store.setString('server_input', v.trim()));
   void setGridCols(int v) => _set(() => _gridCols = v, () => _store.setInt('grid_cols', v));
   void setSortMode(String v) => _set(() => _sortMode = v, () => _store.setString('sort_mode', v));
@@ -75,6 +81,7 @@ class Settings extends ChangeNotifier {
   void setPrintAsText(bool v) => _set(() => _printAsText = v, () => _store.setBool('print_as_text', v));
   void setChargeOnTerminal(bool v) => _set(() => _chargeOnTerminal = v, () => _store.setBool('charge_on_terminal', v));
   void setDemoMode(bool v) => _set(() => _demoMode = v, () => _store.setBool('demo_mode', v));
+  void setForceStone(bool v) => _set(() => _forceStone = v, () => _store.setBool('force_stone', v));
 
   void _set(VoidCallback apply, Future<void> Function() persist) {
     apply();

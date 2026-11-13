@@ -124,7 +124,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   if (!t.canPrint)
                     const Padding(
                       padding: EdgeInsets.only(bottom: 8),
-                      child: Note('Impressora da Stone não encontrada neste aparelho.', center: false),
+                      child: Note(
+                        'Impressora da Stone não detectada. Se este aparelho é uma maquininha Stone, '
+                        'ligue "Usar os apps da Stone" logo abaixo.',
+                        center: false,
+                      ),
                     ),
                   SwitchRow(
                     title: 'Imprimir a conta',
@@ -167,31 +171,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ]),
                 _section('Maquininha', [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(
-                        t.stoneAvailable ? Icons.check_circle : Icons.info_outline,
+                        t.hasStone ? Icons.check_circle : Icons.info_outline,
                         size: 18,
-                        color: t.stoneAvailable ? C.emerald600 : C.amber600,
+                        color: t.hasStone ? C.emerald600 : C.amber600,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           t.stoneAvailable
-                              ? 'App de pagamento da Stone encontrado.'
-                              : 'App de pagamento da Stone não encontrado: cartão e Pix são apenas registrados.',
+                              ? 'Apps da Stone encontrados neste aparelho.'
+                              : s.forceStone
+                              ? 'Usando os apps da Stone por escolha sua (não foram detectados automaticamente).'
+                              : 'Apps da Stone não detectados: cartão e Pix são apenas registrados e nada é impresso.',
                           style: T.xs(c: C.zinc600),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 6),
+                  if (!t.stoneAvailable)
+                    SwitchRow(
+                      title: 'Usar os apps da Stone',
+                      subtitle: 'Ligue se este aparelho é uma maquininha Stone',
+                      value: s.forceStone,
+                      onChanged: s.setForceStone,
+                    ),
                   SwitchRow(
                     title: 'Cobrar cartão e Pix na maquininha',
                     subtitle: 'Abre o pagamento da Stone antes de registrar',
                     value: s.chargeOnTerminal,
                     onChanged: s.setChargeOnTerminal,
                   ),
-                  if (!t.stoneAvailable)
+                  if (!t.hasStone)
                     SwitchRow(
                       title: 'Modo demonstração',
                       subtitle: 'Simula cobrança e impressão (só fora da maquininha)',

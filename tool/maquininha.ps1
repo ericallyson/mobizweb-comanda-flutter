@@ -19,6 +19,7 @@
   .\tool\maquininha.ps1
   .\tool\maquininha.ps1 -Chaves D:\stone\gertec -Logs
   .\tool\maquininha.ps1 -VarianteDebug        # se o terminal recusar o build de release
+  .\tool\maquininha.ps1 -Diagnostico          # o que há no terminal (apps da Stone, deeplinks)
 
 .NOTES
   Para HOMOLOGAR troque android\key.properties pela sua keystore própria
@@ -35,7 +36,10 @@ param(
     # Compila mas não instala.
     [switch]$SemInstalar,
     # Depois de instalar, fica mostrando os logs do app.
-    [switch]$Logs
+    [switch]$Logs,
+    # Não compila nem instala: mostra o que a maquininha tem (Android, apps da
+    # Stone e se os deeplinks de pagamento/impressão respondem).
+    [switch]$Diagnostico
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,6 +70,36 @@ function Somar-Path($pasta) {
     }
 }
 
+# ── Diagnóstico do terminal ─────────────────────────────────────────────────
+function Diagnosticar {
+    Passo 'Diagnóstico da maquininha'
+    [void](Rodar 'adb' @('start-server'))
+    $aparelhos = @(Rodar 'adb' @('devices') | Where-Object { $_ -match "`tdevice\s*$" })
+    if ($aparelhos.Count -ne 1) { Falha "Esperava 1 maquininha ligada por USB; o adb vê $($aparelhos.Count)." }
+    $prop = { param($nome) ((Rodar 'adb' @('shell', 'getprop', $nome)) -join '').Trim() }
+    Info "Modelo:  $(& $prop 'ro.product.manufacturer') $(& $prop 'ro.product.model')"
+    Info "Android: $(& $prop 'ro.build.version.release') (API $(& $prop 'ro.build.version.sdk'))"
+    Info "CPU:     $(& $prop 'ro.product.cpu.abilist')"
+
+    Write-Host "`n    Apps da Stone instalados:"
+    $pacotes = @(Rodar 'adb' @('shell', 'pm', 'list', 'packages') | Where-Object { $_ -match 'stone' } | Sort-Object)
+    if ($pacotes.Count -eq 0) { Info '  (nenhum pacote com "stone" no nome)' }
+    foreach ($p in $pacotes) {
+        $nome = ($p -replace '^package:', '').Trim()
+        $versao = (Rodar 'adb' @('shell', 'dumpsys', 'package', $nome) | Where-Object { $_ -match 'versionName=' } | Select-Object -First 1)
+        Info "  $nome  $(("$versao").Trim())"
+    }
+
+    Write-Host "`n    Quem atende cada deeplink:"
+    foreach ($uri in 'payment-app://pay', 'cancel-app://cancel', 'printer-app://print', 'reprinter-app://reprint') {
+        $r = @(Rodar 'adb' @('shell', 'cmd', 'package', 'query-activities', '--brief', '-a', 'android.intent.action.VIEW', '-d', $uri) |
+            Where-Object { $_ -match '/' })
+        $quem = if ($r.Count -gt 0) { ($r | ForEach-Object { $_.Trim() }) -join ', ' } else { 'NINGUÉM (deeplink não disponível neste terminal)' }
+        Info "  $uri  ->  $quem"
+    }
+    Write-Host "`nCopie o texto acima se precisar de ajuda." -ForegroundColor Green
+}
+
 # ── 1. Ambiente ─────────────────────────────────────────────────────────────
 function Preparar-Ambiente {
     # Onde o setup-windows.ps1 instala; cobre o terminal aberto antes do setup.
@@ -83,7 +117,7 @@ function Preparar-Ambiente {
 Passo 'Ambiente'
 Preparar-Ambiente
 $precisa = @('flutter', 'keytool')
-if (-not $SomenteChave -and -not $SemInstalar) { $precisa += 'adb' }
+if ($Diagnostico -or (-not $SomenteChave -and -not $SemInstalar)) { $precisa += 'adb' }
 $faltando = @($precisa | Where-Object { -not (Tem $_) })
 if ($faltando.Count -gt 0) {
     Info "Faltando: $($faltando -join ', '). Rodando o setup do ambiente (demora na primeira vez)..."
@@ -93,6 +127,7 @@ if ($faltando.Count -gt 0) {
     if ($faltando.Count -gt 0) { Falha "Ainda falta: $($faltando -join ', '). Feche e abra o PowerShell e rode de novo." }
 }
 Info 'Flutter, JDK e adb encontrados.'
+if ($Diagnostico) { Diagnosticar; exit 0 }
 
 # Android SDK instalado pelo nosso setup (C:\dev\android-sdk): confere e
 # conserta. Cobre a instalação que ficou sem o NDK por causa do sdkmanager

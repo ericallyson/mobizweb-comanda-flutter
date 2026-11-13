@@ -72,23 +72,28 @@
             android:value="2" />
     </application>
 
-    <!-- Android 11+: visibilidade dos apps da Stone que atendem os deeplinks. -->
+    <!--
+      Android 11+: visibilidade dos apps da Stone que atendem os deeplinks.
+      O HOST é obrigatório aqui: os apps da Stone declaram scheme + host no
+      filtro deles, e uma consulta só com o scheme não casa — o app passava a
+      "não enxergar" pagamento e impressora (canHandle devolvia false).
+    -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
-            <data android:scheme="payment-app"/>
+            <data android:scheme="payment-app" android:host="pay"/>
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
-            <data android:scheme="cancel-app"/>
+            <data android:scheme="cancel-app" android:host="cancel"/>
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
-            <data android:scheme="printer-app"/>
+            <data android:scheme="printer-app" android:host="print"/>
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
-            <data android:scheme="reprinter-app"/>
+            <data android:scheme="reprinter-app" android:host="reprint"/>
         </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
