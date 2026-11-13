@@ -66,17 +66,20 @@ Escolhas que valem saber:
 
 ### Windows
 
-No PowerShell:
+Com o [Git](https://git-scm.com/download/win) instalado, no PowerShell:
 
 ```powershell
+git clone https://github.com/ericallyson/mobizweb-comanda-flutter.git C:\projetos\mobizweb-pos-flutter
+cd C:\projetos\mobizweb-pos-flutter
 Set-ExecutionPolicy -Scope Process Bypass -Force
-irm https://raw.githubusercontent.com/ericallyson/mobizweb-comanda-flutter/main/tool/setup-windows.ps1 | iex
+.\tool\setup-windows.ps1
 ```
 
-O script instala Git, JDK 17, Flutter 3.50 e o Android SDK em `C:\dev`, clona
-o projeto em `C:\projetos\mobizweb-pos-flutter`, baixa as dependências e roda
-os testes. (Enquanto o código estiver só em um branch, clone o branch e rode
-`.\tool\setup-windows.ps1 -Branch <nome-do-branch>`.)
+O script instala o que faltar — JDK 17, Flutter 3.50 e o Android SDK (em
+`C:\dev`) —, configura `JAVA_HOME`/`ANDROID_HOME`/`PATH`, baixa as
+dependências e roda os testes. Pode ser executado de novo sem problema.
+(Se o código ainda estiver só num branch, acrescente `-b <branch>` ao
+`git clone`.)
 
 ### Linux / macOS
 

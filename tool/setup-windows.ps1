@@ -7,12 +7,13 @@
   C:\projetos\mobizweb-pos-flutter; baixa as dependências e roda os testes.
   Pode ser executado mais de uma vez: o que já existe é mantido.
 
-  Abra o PowerShell (não precisa ser administrador) e rode:
+  Com o repositório clonado, abra o PowerShell (não precisa ser
+  administrador) na pasta do projeto e rode:
 
     Set-ExecutionPolicy -Scope Process Bypass -Force
-    irm https://raw.githubusercontent.com/ericallyson/mobizweb-comanda-flutter/main/tool/setup-windows.ps1 | iex
+    .\tool\setup-windows.ps1
 
-  ou, com o repositório já clonado:  .\tool\setup-windows.ps1
+  Rodando de outro lugar, o script clona o projeto em -ProjectDir.
 
 .NOTES
   Versões fixadas para bater com o que foi usado no desenvolvimento.
