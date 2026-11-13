@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- INTERNET no debug: o Flutter precisa dela para hot reload e depuração. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!--
+      Só no build de DEBUG: permite HTTP sem TLS para falar com o servidor
+      falso (tool/mock-server.mjs) na rede local. O release continua HTTPS.
+    -->
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic" />
+</manifest>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Navy do Mobiz (primary-600) — fundo da abertura, igual ao do PWA. -->
+    <color name="mobiz_navy">#080A52</color>
+</resources>

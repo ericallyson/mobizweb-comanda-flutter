@@ -1,0 +1,101 @@
+import 'package:material_ui/material_ui.dart';
+
+import '../app.dart';
+import '../core/api.dart';
+import '../models/models.dart';
+import '../print/receipt.dart';
+import 'kit.dart';
+
+/// Imprime e avisa na tela se a impressora recusou.
+Future<bool> _print(BuildContext context, List<PLine> lines) async {
+  final error = await app.terminal.printLines(lines);
+  if (error != null && context.mounted) toast(context, 'Impressão: $error', error: true);
+  return error == null;
+}
+
+String? get _operator => app.auth.user?.name;
+String get _storeName => app.auth.store?.name ?? '';
+
+/// Conta/conferência da mesa aberta (payload do servidor).
+Future<bool> printSessionBill(BuildContext context) async {
+  final session = app.session.session;
+  if (session == null) return false;
+  try {
+    final receipt = await app.session.fetchReceipt();
+    if (!context.mounted) return false;
+    return await _print(context, billReceipt(receipt, guestCount: session.guestCount));
+  } on ApiException catch (e) {
+    if (context.mounted) toast(context, 'Não foi possível montar a conta: ${e.message}', error: true);
+    return false;
+  }
+}
+
+/// Conta de uma comanda da mesa.
+Future<bool> printComandaBill(BuildContext context, Comanda comanda) async {
+  final session = app.session.session;
+  if (session == null) return false;
+  return _print(
+    context,
+    comandaReceipt(
+      storeName: _storeName,
+      tableLabel: session.title.toUpperCase(),
+      comanda: comanda,
+      items: session.items,
+      operator: _operator,
+    ),
+  );
+}
+
+/// Via do pedido recém-enviado.
+Future<bool> printOrderTicket(
+  BuildContext context, {
+  required String tableLabel,
+  String? comandaLabel,
+  String? customerName,
+  required List<CartItem> items,
+}) => _print(
+  context,
+  orderTicket(
+    tableLabel: tableLabel.toUpperCase(),
+    comandaLabel: comandaLabel,
+    customerName: customerName,
+    operator: _operator,
+    items: items,
+  ),
+);
+
+Future<bool> printCounterSale(
+  BuildContext context, {
+  required CounterSaleResult sale,
+  required List<CartItem> items,
+  required List<({String label, double amount})> payments,
+  String? customerName,
+}) => _print(
+  context,
+  counterReceipt(
+    storeName: _storeName,
+    number: sale.number,
+    customerName: customerName,
+    operator: _operator,
+    items: items,
+    payments: payments,
+    total: sale.total,
+    change: sale.changeAmount,
+  ),
+);
+
+Future<bool> printCashClose(
+  BuildContext context, {
+  required CashDetail detail,
+  required Map<String, double> counted,
+  required bool showExpected,
+}) => _print(
+  context,
+  cashCloseSlip(
+    storeName: _storeName,
+    operator: _operator,
+    detail: detail,
+    counted: counted,
+    showExpected: showExpected,
+  ),
+);
