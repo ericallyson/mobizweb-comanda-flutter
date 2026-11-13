@@ -23,27 +23,40 @@ param(
     [string]$ProjectDir = 'C:\projetos\mobizweb-pos-flutter',
     [string]$ToolsDir   = 'C:\dev',
     [string]$RepoUrl    = 'https://github.com/ericallyson/mobizweb-comanda-flutter.git',
-    [string]$Branch     = ''
+    [string]$Branch     = '',
+    # Só instala/conserta o Android SDK (usado pelo maquininha.ps1).
+    [switch]$SomenteSdk
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'   # Invoke-WebRequest fica MUITO mais rápido
 
 $FlutterVersion = '3.50.0'
-$CmdlineTools   = '16111833'
+# cmdline-tools 10.0. NÃO subir sem testar no Windows: a partir da 23.0 o
+# sdkmanager.bat virou um atalho para o "Android CLI" que lê os argumentos com
+# %1/shift, e o cmd parte "ndk;28.2.13676358" no ponto e vírgula ("Package ndk
+# not found"). O próprio Flutter chama o sdkmanager nesse formato no build.
+$CmdlineTools   = '9862592'
 $AndroidApi     = '36'
 $BuildTools     = '36.0.0'
 $NdkVersion     = '28.2.13676358'
+
+$NoWindows = ($env:OS -eq 'Windows_NT')
+$Bat = if ($NoWindows) { '.bat' } else { '' }
+$Exe = if ($NoWindows) { '.exe' } else { '' }
 
 function Step($text) { Write-Host "`n==> $text" -ForegroundColor Cyan }
 function Have($cmd)  { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
 function Add-UserPath($dir) {
-    $current = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (($current -split ';') -notcontains $dir) {
-        [Environment]::SetEnvironmentVariable('Path', "$current;$dir".Trim(';'), 'User')
+    $sep = [IO.Path]::PathSeparator
+    if ($NoWindows) {
+        $current = [Environment]::GetEnvironmentVariable('Path', 'User')
+        if (($current -split $sep) -notcontains $dir) {
+            [Environment]::SetEnvironmentVariable('Path', "$current$sep$dir".Trim($sep), 'User')
+        }
     }
-    if (($env:Path -split ';') -notcontains $dir) { $env:Path = "$env:Path;$dir" }
+    if (($env:Path -split $sep) -notcontains $dir) { $env:Path = "$env:Path$sep$dir" }
 }
 
 function Set-UserEnv($name, $value) {
@@ -52,15 +65,17 @@ function Set-UserEnv($name, $value) {
 }
 
 function Get-Zip($url, $destination) {
-    $zip = Join-Path $env:TEMP ([IO.Path]::GetFileName($url))
+    $zip = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetFileName($url))
     Write-Host "    baixando $url"
     Invoke-WebRequest -Uri $url -OutFile $zip
     Write-Host "    extraindo em $destination"
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
     # O tar do Windows 10+ extrai o zip do Flutter em 1-2 min; o
     # Expand-Archive do PowerShell 5.1 pode levar mais de 10.
-    if (Have tar) {
-        tar -xf $zip -C $destination
+    # (o tar do System32 é o bsdtar, que abre zip; o do Git não abre.)
+    $tar = if ($NoWindows) { Join-Path $env:SystemRoot 'System32\tar.exe' } else { $null }
+    if ($tar -and (Test-Path $tar)) {
+        & $tar -xf $zip -C $destination
         if ($LASTEXITCODE -ne 0) { throw "Falha ao extrair $zip" }
     } else {
         Expand-Archive -Path $zip -DestinationPath $destination -Force
@@ -71,14 +86,16 @@ function Get-Zip($url, $destination) {
 New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
 
 # ── Git e JDK (winget) ──────────────────────────────────────────────────────
-Step 'Git'
-if (Have git) { Write-Host '    já instalado' }
-elseif (Have winget) { winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements }
-else { throw 'Instale o Git (https://git-scm.com/download/win) e rode de novo.' }
+if (-not $SomenteSdk) {
+    Step 'Git'
+    if (Have git) { Write-Host '    já instalado' }
+    elseif (Have winget) { winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements }
+    else { throw 'Instale o Git (https://git-scm.com/download/win) e rode de novo.' }
+}
 
 Step 'JDK 17'
 $javaHome = $env:JAVA_HOME
-if (-not $javaHome -or -not (Test-Path "$javaHome\bin\java.exe")) {
+if (-not $javaHome -or -not (Test-Path (Join-Path (Join-Path $javaHome 'bin') "java$Exe"))) {
     $found = Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory -Filter 'jdk-17*' -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $found) {
         if (-not (Have winget)) { throw 'Instale o JDK 17 (https://adoptium.net) e rode de novo.' }
@@ -88,40 +105,78 @@ if (-not $javaHome -or -not (Test-Path "$javaHome\bin\java.exe")) {
     $javaHome = $found.FullName
 }
 Set-UserEnv 'JAVA_HOME' $javaHome
-Add-UserPath "$javaHome\bin"
+Add-UserPath (Join-Path $javaHome 'bin')
 Write-Host "    JAVA_HOME=$javaHome"
 
 # ── Flutter ─────────────────────────────────────────────────────────────────
-Step "Flutter $FlutterVersion"
 $flutterDir = Join-Path $ToolsDir 'flutter'
-if (-not (Test-Path "$flutterDir\bin\flutter.bat")) {
-    Get-Zip "https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_$FlutterVersion-stable.zip" $ToolsDir
-} else { Write-Host '    já instalado' }
-Add-UserPath "$flutterDir\bin"
+if (-not $SomenteSdk) {
+    Step "Flutter $FlutterVersion"
+    if (-not (Test-Path "$flutterDir\bin\flutter.bat")) {
+        Get-Zip "https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_$FlutterVersion-stable.zip" $ToolsDir
+    } else { Write-Host '    já instalado' }
+    Add-UserPath "$flutterDir\bin"
+}
 
 # ── Android SDK ─────────────────────────────────────────────────────────────
-Step 'Android SDK'
-$sdk = Join-Path $ToolsDir 'android-sdk'
-$sdkmanager = "$sdk\cmdline-tools\latest\bin\sdkmanager.bat"
-if (-not (Test-Path $sdkmanager)) {
-    $tmp = Join-Path $env:TEMP 'mobiz-cmdline-tools'
-    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-    Get-Zip "https://dl.google.com/android/repository/commandlinetools-win-${CmdlineTools}_latest.zip" $tmp
-    New-Item -ItemType Directory -Force -Path "$sdk\cmdline-tools" | Out-Null
-    Move-Item "$tmp\cmdline-tools" "$sdk\cmdline-tools\latest"
-    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+function Install-AndroidSdk {
+    Step 'Android SDK'
+    $sdk = Join-Path $ToolsDir 'android-sdk'
+    $latest = Join-Path (Join-Path $sdk 'cmdline-tools') 'latest'
+    $sdkmanager = Join-Path (Join-Path $latest 'bin') "sdkmanager$Bat"
+
+    # Instalação anterior com o sdkmanager novo (o que parte "ndk;versão"):
+    # troca pela versão que funciona.
+    if ((Test-Path $sdkmanager) -and (Select-String -Path $sdkmanager -Pattern 'deprecated' -Quiet)) {
+        Write-Host '    trocando o sdkmanager incompatível pela versão que funciona'
+        Remove-Item $latest -Recurse -Force
+    }
+    if (-not (Test-Path $sdkmanager)) {
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) 'mobiz-cmdline-tools'
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        $plataforma = if ($NoWindows) { 'win' } else { 'linux' }
+        Get-Zip "https://dl.google.com/android/repository/commandlinetools-$plataforma-${CmdlineTools}_latest.zip" $tmp
+        New-Item -ItemType Directory -Force -Path (Join-Path $sdk 'cmdline-tools') | Out-Null
+        Move-Item (Join-Path $tmp 'cmdline-tools') $latest
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Set-UserEnv 'ANDROID_HOME' $sdk
+    Set-UserEnv 'ANDROID_SDK_ROOT' $sdk
+    Add-UserPath (Join-Path $sdk 'platform-tools')
+
+    # Pacote -> arquivo que prova que ele está instalado.
+    $pacotes = [ordered]@{
+        'platform-tools'                 = "platform-tools/adb$Exe"
+        "platforms;android-$AndroidApi"  = "platforms/android-$AndroidApi/android.jar"
+        "build-tools;$BuildTools"        = "build-tools/$BuildTools/aapt2$Exe"
+        "ndk;$NdkVersion"                = "ndk/$NdkVersion/source.properties"
+    }
+    $faltam = @($pacotes.Keys | Where-Object { -not (Test-Path (Join-Path $sdk $pacotes[$_])) })
+    if ($faltam.Count -eq 0) {
+        Write-Host '    plataforma, build-tools, NDK e adb já instalados'
+    } else {
+        Write-Host "    instalando: $($faltam -join ', ')  (o NDK tem ~700 MB)"
+        $yes = ('y' + [Environment]::NewLine) * 40
+        $yes | & $sdkmanager "--sdk_root=$sdk" --licenses | Out-Null
+        & $sdkmanager "--sdk_root=$sdk" --install @faltam
+        # Confere no disco: o código de saída do sdkmanager não é confiável.
+        $faltam = @($pacotes.Keys | Where-Object { -not (Test-Path (Join-Path $sdk $pacotes[$_])) })
+        if ($faltam.Count -gt 0) {
+            throw "O Android SDK ficou incompleto. Não foi instalado: $($faltam -join ', '). Confira a internet e rode de novo."
+        }
+    }
+
+    $flutter = Join-Path (Join-Path (Join-Path $ToolsDir 'flutter') 'bin') "flutter$Bat"
+    if (Test-Path $flutter) { & $flutter config --android-sdk $sdk --no-analytics | Out-Null }
 }
-Set-UserEnv 'ANDROID_HOME' $sdk
-Set-UserEnv 'ANDROID_SDK_ROOT' $sdk
-Add-UserPath "$sdk\platform-tools"
 
-Write-Host '    aceitando licenças e instalando plataforma, build-tools, NDK e adb'
-$yes = ('y' + [Environment]::NewLine) * 40
-$yes | & $sdkmanager --licenses | Out-Null
-& $sdkmanager --install 'platform-tools' "platforms;android-$AndroidApi" "build-tools;$BuildTools" "ndk;$NdkVersion"
-if ($LASTEXITCODE -ne 0) { throw 'O sdkmanager falhou. Confira a conexão e rode de novo.' }
+if ($SomenteSdk) {
+    Install-AndroidSdk
+    Write-Host "`nAndroid SDK pronto." -ForegroundColor Green
+    return
+}
 
-& "$flutterDir\bin\flutter.bat" config --android-sdk $sdk --no-analytics | Out-Null
+Install-AndroidSdk
 
 # ── Projeto ─────────────────────────────────────────────────────────────────
 Step "Projeto em $ProjectDir"

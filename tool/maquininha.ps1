@@ -94,6 +94,14 @@ if ($faltando.Count -gt 0) {
 }
 Info 'Flutter, JDK e adb encontrados.'
 
+# Android SDK instalado pelo nosso setup (C:\dev\android-sdk): confere e
+# conserta. Cobre a instalação que ficou sem o NDK por causa do sdkmanager
+# novo, que não entende "ndk;versão" no Windows. Rápido quando está completo.
+if (-not $SomenteChave -and $env:ANDROID_HOME -and ((Split-Path $env:ANDROID_HOME -Leaf) -eq 'android-sdk')) {
+    & (Join-Path $PSScriptRoot 'setup-windows.ps1') -SomenteSdk -ToolsDir (Split-Path $env:ANDROID_HOME -Parent)
+    Preparar-Ambiente
+}
+
 # ── 2. Chave do fabricante ──────────────────────────────────────────────────
 Passo "Chave do fabricante em $Chaves"
 if (-not (Test-Path $Chaves)) { Falha "A pasta $Chaves não existe. Informe a pasta certa com -Chaves." }
