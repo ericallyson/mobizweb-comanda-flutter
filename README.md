@@ -9,7 +9,7 @@ coisas que o navegador não faz: **cobrar cartão/Pix na própria maquininha** e
 O dono continua usando o Mobizweb na web para cadastros, relatórios e
 acompanhar as vendas: o app só consome a API `/api/garcom/v1`.
 
-![Telas do Mobiz POS: login, mesas, cardápio, produto, carrinho, via do pedido, conta e recebimento](docs/telas.png)
+![Telas do Mobiz POS: mapa de mesas, cardápio, montagem da pizza, revisar pedido, mesa aberta, receber conta, conta paga e caixa](docs/telas.png)
 
 ## O que faz
 
@@ -21,18 +21,27 @@ acompanhar as vendas: o app só consome a API `/api/garcom/v1`.
   ou comanda digitada), chips de filtro com contagem e abas Mesas/Comandas.
 - **Notificações** (sino): chamados e pedidos feitos no tablet da mesa e
   estoque crítico, atualizados a cada 30 s.
-- **Mais**: notificações, ler QR da comanda (código digitado, sem câmera),
-  atualizar, trocar loja, configurações e sair.
-- **Mesa aberta**: cardápio em categorias com busca, produto com adicionais
-  (mínimo/máximo, repetição), pizza de vários sabores, combo e venda por peso;
-  carrinho; envio para a cozinha; itens lançados; cancelar e transferir item;
-  conta parcial; couvert; nome do cliente; transferir, reabrir e cancelar mesa.
+- **Mais**: notificações, ler QR da comanda (pela **câmera** do aparelho ou
+  digitando o código), atualizar, trocar loja, configurações e sair.
+- **Lançar pedido**: mesa livre abre direto no **cardápio** (categorias em
+  blocos, busca, "+" que lança na hora); produto com adicionais
+  (mínimo/máximo, repetição), pizza de vários sabores, combo e venda por peso
+  numa janela em abas; **Revisar pedido** com pessoas, cliente e comandas (a
+  mesa só é aberta no servidor ao enviar) e envio para a cozinha.
+- **Mesa aberta**: total da conta, grade de opções (gerar QR do tablet na
+  mesa, ver conta parcial, lançar couvert, comandas da mesa, transferir mesa,
+  transferir item), itens com "Transferir" e "Cancelar" em cada linha,
+  cancelar mesa e a barra "+ Itens · Pedir conta · Receber conta". Reabrir e
+  fechar mesa aparecem quando a mesa está fechando ou quitada.
 - **Comandas dentro da mesa**: abrir, renomear, excluir, pedir conta, receber,
   transferir, cancelar, retirar/reaplicar taxa de serviço.
-- **Recebimento**: dinheiro (com troco), formas do PDV da loja, Pix online
-  (QR do servidor) e **cartão/Pix/voucher cobrados na maquininha**, com
-  pagamento parcial e fechamento da mesa.
-- **Balcão**: venda rápida com pagamento dividido em várias formas.
+- **Receber conta / Receber venda**: tela com o valor restante e a barra de
+  progresso, formas do PDV da loja em grade, dinheiro (com valor recebido e
+  troco), Pix online (QR do servidor) e **cartão/Pix/voucher cobrados na
+  maquininha**. Pagamento parcial continua na tela com o novo restante; ao
+  quitar aparece "Conta paga" (ou "Venda recebida") e a mesa fecha.
+- **Balcão**: o mesmo cardápio, a tela "Venda de balcão" e o recebimento
+  dividido em várias formas.
 - **Caixa**: abertura, suprimento, sangria, detalhes e fechamento (inclusive
   fechamento cego).
 - **Impressão na maquininha** (configurável): conta, via do pedido, venda de
@@ -49,19 +58,24 @@ lib/
   print/     layouts dos documentos e renderização para a bobina
   ui/        kit visual (layout novo do garçom), telas e folhas
 android/     MainActivity.kt = ponte dos deeplinks + preferências + token cifrado
+             + leitor de QR pela câmera e imagem de QR (ZXing)
 tool/        build, deploy, verificação do APK, servidor falso e prévia
 docs/stone.md  integração, instalação na maquininha e checklist de homologação
 docs/layout-novo.md  layout novo do garçom: componentes, tabela "ação → rotina
-               existente" e o que ainda falta trocar
+               existente", o que ficou diferente do plano e a lista de aceite
 ```
 
 Escolhas que valem saber:
 
 - **Deeplink, não SDK da Stone** — dispensa o token do repositório privado e
   mantém o APK pequeno. Detalhes em [docs/stone.md](docs/stone.md).
-- **Uma dependência externa** (`http`). Preferências e token passam por um
-  canal nativo próprio (token cifrado com chave do Android Keystore), sem
-  plugins — menos peso e manifest fácil de auditar.
+- **Uma dependência externa** no Dart (`http`). Preferências e token passam
+  por um canal nativo próprio (token cifrado com chave do Android Keystore),
+  sem plugins — menos peso e manifest fácil de auditar.
+- **QR sem Google Play Services**: a leitura do QR da comanda (câmera) e a
+  imagem do QR do tablet usam ZXing no lado Android, pelo mesmo canal nativo.
+  O app pede só duas permissões, `INTERNET` e `CAMERA`; a câmera é opcional
+  (sem ela, o código é digitado).
 - **Sem WebSocket**: a Stone proíbe no app embarcado. Mesas e mesa aberta
   atualizam por polling HTTPS (15 s e 30 s), o mesmo fallback do PWA.
 - **Dinheiro**: os totais vêm sempre do servidor (`bill`); o app só converte
@@ -117,7 +131,7 @@ compila, instala e abre o app:
 .\tool\maquininha.ps1
 ```
 
-O APK sai em `build/app/outputs/flutter-apk/app-release.apk` (~14 MB; limite
+O APK sai em `build/app/outputs/flutter-apk/app-release.apk` (~15 MB; limite
 da Stone: 70 MB). Sem `android/key.properties` ele é assinado com a chave de
 debug — serve para a maquininha de desenvolvimento, não para homologar.
 Assinatura, JKS de fabricante (Positivo/Gertec) e checklist:
@@ -176,16 +190,16 @@ Stone (com os exemplos da documentação); layouts de impressão; regras de
 adicional e preço de pizza; leitura tolerante do JSON; cliente da API
 (idempotência, 401, mensagens de erro); **a conciliação de pagamento da
 maquininha** (aprovado, recusado, servidor fora do ar, app encerrado no meio
-da cobrança); e o fluxo login → mesas na interface.
+da cobrança); o fluxo login → mesas → cardápio → revisão na interface; e a
+mesa aberta e o recebimento (as 9 opções da mesa, pagamento parcial e total,
+cartão pela maquininha com os campos de TEF, dinheiro com valor recebido,
+balcão em duas formas, QR do tablet e leitura do QR da comanda).
 
 ## O que ainda não tem (em relação ao PWA)
 
 - **Fila offline de lançamentos.** Sem rede o app mostra os últimos dados e
   bloqueia as ações; o envio do pedido pode ser repetido sem duplicar, mas
   não fica guardado para depois.
-- **Central de notificações** do tablet na mesa (chamado de garçom). Os
-  pedidos do tablet aguardando liberação aparecem e podem ser liberados.
-- **Leitura de QR Code** de comanda/cartão e **QR do tablet** na mesa.
 - **Desconto e ajuste de taxa da mesa inteira** (a retirada de taxa por
   comanda existe).
 - **Tempo real por WebSocket** — proibido pela Stone; usa polling.

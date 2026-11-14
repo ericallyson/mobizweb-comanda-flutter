@@ -1009,9 +1009,6 @@ class QtyStepper extends StatelessWidget {
   );
 }
 
-/// Nome antigo de [QtyStepper] (telas ainda não refeitas).
-typedef Stepper2 = QtyStepper;
-
 /// Linha "rótulo …… valor" dos resumos de conta.
 class KV extends StatelessWidget {
   const KV(this.k, this.v, {super.key, this.strong = false, this.color});
@@ -1498,10 +1495,3 @@ class SwitchRow extends StatelessWidget {
     ),
   );
 }
-
-/// Valor em destaque, com algarismos tabulares.
-Text bigMoney(num value, {double size = 18}) => Text(
-  brl(value),
-  textAlign: TextAlign.center,
-  style: T.num(size, c: C.primary700, h: 1.3),
-);

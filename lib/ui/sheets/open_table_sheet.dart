@@ -138,7 +138,7 @@ class _OpenTableSheetState extends State<OpenTableSheet> {
               ),
             ),
           const SizedBox(height: 4),
-          Text('Você também pode abrir mais comandas depois, em "Opções da mesa".', style: T.s(11, c: C.zinc400)),
+          Text('Você também pode abrir mais comandas depois, em "Comandas da mesa".', style: T.s(11, c: C.zinc400)),
         ],
       ],
     ],

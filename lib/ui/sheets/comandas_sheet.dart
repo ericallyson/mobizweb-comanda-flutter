@@ -5,7 +5,7 @@ import '../../models/models.dart';
 import '../../stores/session.dart';
 import '../kit.dart';
 import '../printing.dart';
-import 'receive_sheet.dart';
+import '../screens/receive_screen.dart';
 
 const _statusLabels = {'open': 'Aberta', 'closing': 'Fechando', 'paid': 'Paga', 'canceled': 'Cancelada'};
 const _tableStateLabels = {'free': 'Livre', 'open': 'Ocupada', 'closing': 'Fechando'};
@@ -13,8 +13,9 @@ const _tableStateLabels = {'free': 'Livre', 'open': 'Ocupada', 'closing': 'Fecha
 enum _View { list, attach, rename, transfer, cancel, fee }
 
 /// "Comandas da mesa": abrir, renomear, excluir, pedir conta, receber,
-/// transferir, cancelar e retirar/reaplicar a taxa — por comanda. Espelha
-/// `ComandasModal.vue`. Tudo online (conta ao vivo, sem fila).
+/// transferir, cancelar e retirar/reaplicar a taxa, por comanda. Espelha
+/// `ComandasModal.vue`. Tudo online (conta ao vivo, sem fila). "Receber" abre
+/// a tela de recebimento ([ReceiveScreen.comanda]).
 ///
 /// Fecha com `'ended'` quando a mesa de origem foi encerrada (a última
 /// comanda saiu dela).
@@ -100,14 +101,11 @@ class _ComandasSheetState extends State<ComandasSheet> {
   int _itemsOf(Comanda c) => c.itemsCount ?? (c.itemsSubtotal > 0.005 ? 1 : 0);
 
   Future<void> _pay(Comanda c) async {
-    final detail = c.serviceFee > 0.005
-        ? 'Itens ${brl(c.itemsSubtotal)} + Serviço (${percent(c.serviceFeePercentage)}%) ${brl(c.serviceFee)}'
-        : null;
-    final paid = await showSheet<bool>(
+    await Navigator.push<ReceiveResult>(
       context,
-      (_) => ReceiveSheet(kind: 'comanda', targetId: c.id, label: 'Comanda ${c.label}', remaining: c.remaining, detail: detail),
+      MaterialPageRoute(builder: (_) => ReceiveScreen.comanda(comanda: c)),
     );
-    if (!mounted || paid != true) return;
+    if (!mounted) return;
     app.tables.fetch();
     await _load();
     if (!mounted) return;

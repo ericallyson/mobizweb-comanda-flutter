@@ -260,3 +260,11 @@ String stayOnTableText(String tableTitle) {
   final ref = _tableRef(tableTitle);
   return ref == null ? 'Ficar em $tableTitle' : 'Ficar na $ref';
 }
+
+/// Aviso do mapa depois de "Pedir conta": "Conta da mesa 7 impressa · mesa em
+/// fechamento" (ou "pedida", quando a conta não foi impressa).
+String billRequestedText(String tableTitle, {required bool printed}) {
+  final ref = _tableRef(tableTitle);
+  final what = printed ? 'impressa' : 'pedida';
+  return ref == null ? 'Conta de $tableTitle $what · em fechamento' : 'Conta da $ref $what · mesa em fechamento';
+}

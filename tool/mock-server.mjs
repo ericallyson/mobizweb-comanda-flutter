@@ -237,7 +237,9 @@ function presentSession(s) {
     const unassigned = s.comandas.some((c) => ['open', 'closing'].includes(c.status)) ? active.filter((i) => !i.comanda_id) : [];
     const openOthers = [...sessions.values()].filter((x) => ['open', 'closing'].includes(x.status));
     return {
-        id: s.id, status: s.status, pending_tablet_orders: [], opened_at: s.opened_at, guest_count: s.guest_count,
+        id: s.id, status: s.status, opened_at: s.opened_at,
+        // Pedidos do tablet desta mesa aguardando o garçom liberar.
+        pending_tablet_orders: tabletOrders.filter((o) => o.table.id === t.id).map((o) => ({ id: o.id, items: o.items.map((i) => ({ product_name: i.name, quantity: i.quantity, notes: i.notes ?? null })) })), guest_count: s.guest_count,
         customer_name: s.customer_name, couvert: s.couvert, couvert_default_amount: 12, bill: billOf(s),
         table: { id: t.id, number: t.number, label: t.label },
         items: [...s.items].reverse().map((i) => ({ ...i, can_cancel: !['canceled', 'delivered'].includes(i.status), can_transfer: i.status !== 'canceled' })),
@@ -376,6 +378,13 @@ const routes = [
         return { message: 'Conta solicitada.' };
     }],
     ['GET', '/sessions/:id', (m) => ({ session: presentSession(sessionOf(m.id)) })],
+    // "Gerar QR do tablet na mesa": código de 6 dígitos (gerar de novo substitui o anterior).
+    ['POST', '/sessions/:id/tablet-code', (m) => {
+        const s = sessionOf(m.id);
+        if (!['open', 'closing'].includes(s.status)) throw fail(409, 'Mesa não está aberta.');
+        s.tablet_code = String(Math.floor(Math.random() * 1000000)).padStart(6, '0');
+        return { code: s.tablet_code, table_number: tables.find((x) => x.id === s.table_id).number };
+    }],
     ['GET', '/sessions/:id/receipt', (m) => { const s = sessionOf(m.id); return { receipt: receiptOf(s), bill: billOf(s) }; }],
     ['POST', '/sessions/:id/orders', (m, b) => {
         const s = sessionOf(m.id);

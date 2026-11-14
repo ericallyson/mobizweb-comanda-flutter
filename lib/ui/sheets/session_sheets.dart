@@ -7,59 +7,6 @@ import '../../models/models.dart';
 import '../../stores/session.dart';
 import '../kit.dart';
 
-// ── Opções da mesa ───────────────────────────────────────────────────────────
-
-/// Menu "Opções da mesa". Fecha devolvendo a ação escolhida.
-class TableOptionsSheet extends StatelessWidget {
-  const TableOptionsSheet({super.key, required this.session});
-  final SessionDetail session;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = app.auth.permissions;
-    final isOpen = session.isOpen;
-    final isClosing = session.isClosing;
-    final hasItems = session.activeItems.isNotEmpty;
-    final hasComandas = session.hasComandas;
-
-    Widget opt(String action, IconData icon, String label, {bool enabled = true, bool danger = false}) => Opacity(
-      opacity: enabled ? 1 : 0.4,
-      child: Tap(
-        onTap: enabled ? () => Navigator.pop(context, action) : null,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: danger ? C.red500 : C.zinc600),
-            const SizedBox(width: 12),
-            Expanded(child: Text(label, style: T.sm(w: T.medium, c: danger ? C.red500 : C.zinc800))),
-          ],
-        ),
-      ),
-    );
-
-    return SheetBody(
-      children: [
-        Text('OPÇÕES DA MESA', style: T.sm(w: T.bold, c: C.zinc400)),
-        const SizedBox(height: 8),
-        if (isOpen && p.requestBill) opt('request-bill', Icons.receipt_long_outlined, 'Pedir conta', enabled: hasItems),
-        opt('partial-bill', Icons.visibility_outlined, 'Ver conta parcial'),
-        if (app.terminal.canPrint && hasItems) opt('print-bill', Icons.print_outlined, 'Imprimir conta'),
-        if (p.couvertAdd && isOpen)
-          opt('couvert', Icons.theater_comedy_outlined, session.couvert != null ? 'Couvert (alterar pessoas)' : 'Lançar couvert'),
-        if (p.processPayment && !hasComandas && (isOpen || isClosing) && hasItems)
-          opt('receive', Icons.credit_card, 'Receber conta'),
-        if (p.manageComanda && (isOpen || isClosing) && (session.enableComandas || hasComandas))
-          opt('comandas', Icons.list_alt_outlined, 'Comandas da mesa'),
-        if (p.transferTable && (isOpen || isClosing)) opt('transfer-table', Icons.shuffle, 'Transferir mesa'),
-        if (p.transferItem && hasItems) opt('transfer-item', Icons.swap_horiz, 'Transferir item'),
-        if (p.reopenSession && isClosing) opt('reopen', Icons.lock_open_outlined, 'Reabrir mesa'),
-        if (p.cancelSession) opt('cancel-session', Icons.delete_outline, 'Cancelar mesa', danger: true),
-      ],
-      footer: Btn('Fechar', kind: BtnKind.outline, onTap: () => Navigator.pop(context)),
-    );
-  }
-}
-
 // ── Conta parcial ────────────────────────────────────────────────────────────
 
 class PartialBillSheet extends StatelessWidget {
@@ -72,8 +19,8 @@ class PartialBillSheet extends StatelessWidget {
     final bill = session.bill;
     final guests = session.guestCount;
     return SheetBody(
-      title: 'Conta parcial — ${session.title}',
-      subtitle: (guests != null && guests > 0) ? '$guests pessoa(s)' : null,
+      title: 'Conta parcial · ${session.title}',
+      subtitle: (guests != null && guests > 0) ? (guests == 1 ? '1 pessoa' : '$guests pessoas') : null,
       children: [
         if (items.isEmpty)
           Padding(
@@ -88,7 +35,7 @@ class PartialBillSheet extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    '${qty(i.quantity)}× ${i.productName}',
+                    '${qty(i.quantity)}x ${i.productName}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: T.sm(c: C.zinc700),
@@ -161,12 +108,9 @@ class _CancelItemSheetState extends State<CancelItemSheet> {
 
   @override
   Widget build(BuildContext context) => SheetBody(
-    padding: 24,
+    title: 'Cancelar item',
+    subtitle: '${qty(widget.item.quantity)}x ${widget.item.productName}',
     children: [
-      Text('Cancelar item', style: T.base(w: T.bold)),
-      const SizedBox(height: 2),
-      Text('${widget.item.productName} × ${qty(widget.item.quantity)}', style: T.sm(c: C.zinc500)),
-      const SizedBox(height: 14),
       Text('MOTIVO', style: T.label),
       const SizedBox(height: 8),
       for (final r in _reasons)

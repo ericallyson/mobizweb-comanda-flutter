@@ -28,7 +28,8 @@ Onde fica cada parte:
 - `lib/stone/stone_deeplink.dart` — monta as URIs e lê as respostas (código
   puro, coberto por `test/stone_deeplink_test.dart`);
 - `android/app/src/main/kotlin/.../MainActivity.kt` — dispara o `Intent` e
-  recebe o retorno em `onNewIntent`;
+  recebe o retorno em `onNewIntent` (o mesmo arquivo abre o leitor de QR e
+  gera a imagem do QR do tablet: seção "Câmera e QR");
 - `android/app/src/main/AndroidManifest.xml` — um `intent-filter` por
   operação (`pay-response`, `cancel`, `print`, `reprint`) com o scheme
   `mobizpos`;
@@ -103,6 +104,32 @@ Pontos a validar no terminal (a doc não fecha):
 O comprovante do **cartão** (via do cliente e do lojista) é do app de
 pagamento da Stone, não deste app.
 
+### Câmera e QR
+
+A Stone não proíbe a permissão `CAMERA`; proíbe Google Play Services. Por isso
+o QR é tratado com **ZXing** (`com.journeyapps:zxing-android-embedded`, que
+traz `com.google.zxing:core`), sem plugin Flutter, pelo mesmo canal nativo
+`mobiz/native` do `MainActivity`:
+
+| Método do canal | O que faz | Usado em |
+|---|---|---|
+| `scanQr` | Abre o leitor (retrato, câmera traseira, texto "Aponte para o QR da comanda") e devolve o texto lido, `null` se o operador voltar, ou erro `no_camera` / `denied` | **Mais › Ler QR da comanda**, botão "Ler com a câmera" |
+| `qrPng` | Devolve o PNG do QR de um texto (não usa câmera nem rede) | **Mesa aberta › Gerar QR do tablet na mesa** |
+
+- A tela do leitor é a `QrCaptureActivity` (a `CaptureActivity` do ZXing
+  declarada em retrato no manifest); a da biblioteca, em paisagem, é removida
+  do manifest mesclado.
+- A permissão é pedida na primeira leitura. Negada, ou em aparelho sem
+  câmera, o app avisa e o garçom digita o código (o campo continua na tela).
+- O manifest remove de propósito `WAKE_LOCK`, `VIBRATE` e `FLASHLIGHT`
+  (`tools:node="remove"`), caso uma versão futura da biblioteca as traga. O
+  leitor é aberto sem bipe e sem vibração.
+- `tool/check-apk.sh` reprova o APK se aparecer qualquer permissão além de
+  `INTERNET` e `CAMERA`.
+- **A validar no terminal:** foco e leitura com a câmera do modelo usado (a
+  GPOS 730 tem câmera traseira) e o pedido de permissão na primeira leitura.
+  Isso não dá para testar fora do aparelho.
+
 ## 2. Instalação na maquininha de desenvolvimento
 
 1. A maquininha de **debug** (marca d'água "debug"/"mockup") aceita `adb` por
@@ -152,10 +179,18 @@ R$ x,00 → conferir no PDV web o pagamento com TEF → repetir com R$ x,51
 - [x] APK abaixo de 70 MB.
 - [x] `packageName` `br.com.mobizweb.pos` (padrão `br.com.<empresa>.<app>`,
       sem "stone", adquirente, fabricante ou modelo).
-- [x] Só a permissão `INTERNET` — nenhuma das proibidas (`WAKE_LOCK`,
-      `RECEIVE_BOOT_COMPLETED`, `WRITE_EXTERNAL_STORAGE`, `READ_PHONE_STATE`…).
+- [x] Só as permissões `INTERNET` e `CAMERA`, nenhuma das proibidas
+      (`WAKE_LOCK`, `RECEIVE_BOOT_COMPLETED`, `WRITE_EXTERNAL_STORAGE`,
+      `READ_PHONE_STATE`…). `INTERNET` é a API do Mobizweb; `CAMERA` serve só
+      para **Mais › Ler QR da comanda** (seção "Câmera e QR" acima) e é pedida
+      em tempo de execução, na primeira leitura. O manifest mesclado também
+      traz `br.com.mobizweb.pos.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, que
+      é do próprio pacote (AndroidX), não é permissão do sistema.
+- [x] Câmera opcional (`uses-feature` com `required="false"`): terminal sem
+      câmera instala e usa o app normalmente, digitando o código da comanda.
 - [x] Sem WebView, sem WebSocket/MQTT (o mapa de mesas atualiza por polling
-      HTTPS de 15 s) e sem Google Play Services.
+      HTTPS de 15 s) e sem Google Play Services (o leitor de QR é ZXing puro,
+      não ML Kit).
 - [x] Só HTTPS (`usesCleartextTraffic=false`).
 - [x] Não altera configuração do sistema, não usa Bluetooth, não tenta modo
       quiosque nem tela sempre acesa.

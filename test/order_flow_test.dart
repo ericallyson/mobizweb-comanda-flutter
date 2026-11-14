@@ -17,6 +17,7 @@ import 'package:mobizweb_pos/stores/order_draft.dart';
 import 'package:mobizweb_pos/ui/kit.dart';
 import 'package:mobizweb_pos/ui/screens/counter_screen.dart';
 import 'package:mobizweb_pos/ui/screens/menu_screen.dart';
+import 'package:mobizweb_pos/ui/screens/receive_screen.dart';
 import 'package:mobizweb_pos/ui/screens/review_screen.dart';
 import 'package:mobizweb_pos/ui/screens/session_screen.dart';
 import 'package:mobizweb_pos/ui/table_card.dart';
@@ -854,7 +855,7 @@ void main() {
   );
 
   testWidgets(
-    'balcão: mesmo cardápio com "Ver venda", tela "Venda de balcão" com −/+ e "Receber" abrindo o recebimento',
+    'balcão: mesmo cardápio com "Ver venda", tela "Venda de balcão" com −/+ e "Receber" abrindo a tela "Receber venda"',
     (tester) async {
       final server = _Server();
       await _login(tester, server);
@@ -886,10 +887,13 @@ void main() {
       expect(receive.total, 14);
       expect(find.widgetWithText(Btn, '+ Itens'), findsOneWidget);
 
+      // "Receber" leva à TELA "Receber venda" (não é mais uma janela).
       await tester.tap(find.byType(CountBtn));
       await tester.pumpAndSettle();
+      expect(find.byType(ReceiveScreen), findsOneWidget);
       expect(find.text('Receber venda'), findsOneWidget);
-      await tester.tap(find.widgetWithText(Btn, 'Receber'));
+      expect(find.text('Valor restante'), findsOneWidget);
+      await tester.tap(find.widgetWithText(Btn, 'Receber R\$ 14,00 em Dinheiro'));
       await _settle(tester);
       await tester.pumpAndSettle();
       final checkout = server.mutations.last;
@@ -897,9 +901,17 @@ void main() {
       expect(checkout.body['items'], [
         {'product_id': 'guarana', 'quantity': 2},
       ]);
+      expect(checkout.body['payments'], [
+        {'method': 'cash', 'amount': 14.0},
+      ]);
+      // "Venda recebida" e, dela, uma nova venda no cardápio do balcão.
+      expect(find.text('Venda recebida!'), findsOneWidget);
+      expect(find.text('Venda #101'), findsOneWidget);
+      await tester.tap(find.widgetWithText(Btn, 'Nova venda de balcão'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ReceiveScreen), findsNothing);
       expect(find.byType(CounterSaleScreen), findsNothing);
-      expect(find.text('Venda #101 concluída'), findsOneWidget);
-      expect(find.text('Nova venda de balcão'), findsOneWidget);
+      expect(find.byType(MenuScreen), findsOneWidget);
       expect(tester.takeException(), isNull);
       await _unmount(tester);
     },
