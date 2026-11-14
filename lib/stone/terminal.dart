@@ -108,7 +108,7 @@ class Terminal {
     }
 
     final calls = _settings.printAsText
-        ? [toStoneText(lines)]
+        ? [toStoneText(lines, barcodes: await renderBarcodesBase64(lines))]
         : toStoneImageCalls(await renderReceiptPng(lines));
     // Sequencial e síncrono, como a Stone orienta: cada chamada espera a
     // resposta da anterior.

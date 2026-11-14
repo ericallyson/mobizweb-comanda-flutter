@@ -6,7 +6,9 @@ library;
 import '../core/format.dart';
 import '../models/models.dart';
 
-enum PSize { small, medium, big }
+/// `huge` só existe na impressão por imagem (nome do produto na ficha); no modo
+/// texto sai como `big`, o maior tamanho que a impressora da Stone aceita.
+enum PSize { small, medium, big, huge }
 
 enum PAlign { left, center, right }
 
@@ -38,6 +40,22 @@ class PDivider extends PLine {
 class PGap extends PLine {
   const PGap([this.px = 12]);
   final double px;
+}
+
+/// Código de barras Code 128 centralizado. No modo imagem é desenhado; no
+/// modo texto vai como uma imagem pequena no meio das linhas.
+class PBarcode extends PLine {
+  const PBarcode(this.data, {this.height = 64});
+  final String data;
+  final double height;
+}
+
+/// Fim de uma via destacável (uma ficha). A impressora da Stone não tem
+/// guilhotina nem comando de corte no deeplink, então hoje vira uma linha de
+/// picote com folga para rasgar. O renderizador nunca parte uma via no meio e
+/// é neste ponto que entra o comando de corte parcial quando existir.
+class PCut extends PLine {
+  const PCut();
 }
 
 List<PLine> _header(Json store) {
@@ -245,6 +263,10 @@ List<PLine> counterReceipt({
   required List<({String label, double amount})> payments,
   required double total,
   double change = 0,
+
+  /// Soma dos itens pelo preço do cardápio. Quando o servidor grava a venda
+  /// por outro valor (promoção ou tabela de preço), a diferença sai no papel.
+  double? itemsTotal,
 }) => [
   if (storeName.isNotEmpty) PText(storeName, align: PAlign.center, size: PSize.big, bold: true),
   const PDivider(),
@@ -257,11 +279,66 @@ List<PLine> counterReceipt({
     for (final d in cartItemDetails(i)) PText('  $d', size: PSize.small),
   ],
   const PDivider(),
+  if (itemsTotal != null && (itemsTotal - total).abs() > 0.005) ...[
+    PRow('Subtotal', brl(itemsTotal), size: PSize.small),
+    PRow(
+      itemsTotal > total ? 'Desconto' : 'Acréscimo',
+      '${itemsTotal > total ? '-' : '+'} ${brl((itemsTotal - total).abs())}',
+      size: PSize.small,
+    ),
+  ],
   PRow('TOTAL', brl(total), size: PSize.big, bold: true),
   for (final p in payments) PRow(p.label, brl(p.amount), size: PSize.small),
   if (change > 0.005) PRow('Troco', brl(change), size: PSize.small),
   ..._footer,
 ];
+
+/// Código que identifica o produto no código de barras da ficha: o código
+/// (SKU) do cadastro quando o servidor envia; senão, a posição do item na
+/// venda com três dígitos (`001`, `002`…).
+String ticketProductCode(CartItem item, int position) {
+  final code = item.product.code?.trim() ?? '';
+  return code.isNotEmpty ? code : position.toString().padLeft(3, '0');
+}
+
+/// Fichas da venda de balcão (evento): UMA ficha por unidade paga, com o nome
+/// do produto bem visível e um código de barras com o número da venda seguido
+/// do código do produto. Item vendido por peso sai em uma ficha só, com a
+/// quantidade escrita.
+List<PLine> counterTickets({int? number, required List<CartItem> items, DateTime? when}) {
+  final at = when ?? DateTime.now();
+  final stamp = dateTime(at).replaceFirst(' ', ' - ');
+  final lines = <PLine>[];
+  for (final (index, item) in items.indexed) {
+    final whole = item.quantity == item.quantity.roundToDouble() && item.quantity >= 1;
+    final copies = whole ? item.quantity.toInt() : 1;
+    final barcode = '${number ?? ''}${ticketProductCode(item, index + 1)}';
+    for (var n = 0; n < copies; n++) {
+      lines.addAll([
+        const PGap(10),
+        PText(number != null ? 'VENDA Nº $number' : 'VENDA BALCÃO', align: PAlign.center, bold: true),
+        PText(stamp, align: PAlign.center, size: PSize.small),
+        const PGap(6),
+        PText(item.product.name.toUpperCase(), align: PAlign.center, size: PSize.huge, bold: true),
+        if (!whole)
+          PText(
+            '${qty(item.quantity)} ${item.product.unitOfMeasure ?? ''}'.trim(),
+            align: PAlign.center,
+            size: PSize.big,
+            bold: true,
+          ),
+        for (final d in cartItemDetails(item)) PText(d, align: PAlign.center, size: PSize.small),
+        if (item.notes.isNotEmpty) PText('OBS: ${item.notes}', align: PAlign.center, size: PSize.small, bold: true),
+        const PGap(8),
+        PBarcode(barcode),
+        PText(barcode, align: PAlign.center, size: PSize.small),
+        const PCut(),
+      ]);
+    }
+  }
+  if (lines.isNotEmpty) lines.add(const PGap(36));
+  return lines;
+}
 
 /// Resumo curto do fechamento de caixa. A Stone pede para não gerar relatório
 /// grande na impressora do POS: só totais.

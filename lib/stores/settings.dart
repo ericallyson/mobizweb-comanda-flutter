@@ -13,6 +13,7 @@ class Settings extends ChangeNotifier {
     _printBill = _store.getBool('print_bill', true);
     _printOrders = _store.getBool('print_orders', false);
     _printCounter = _store.getBool('print_counter', true);
+    _printTickets = _store.getBool('print_tickets', false);
     _printCashClose = _store.getBool('print_cash_close', false);
     _printAsText = _store.getBool('print_as_text', false);
     _chargeOnTerminal = _store.getBool('charge_on_terminal', true);
@@ -27,6 +28,7 @@ class Settings extends ChangeNotifier {
   late bool _printBill;
   late bool _printOrders;
   late bool _printCounter;
+  late bool _printTickets;
   late bool _printCashClose;
   late bool _printAsText;
   late bool _chargeOnTerminal;
@@ -51,6 +53,9 @@ class Settings extends ChangeNotifier {
   /// Imprime o comprovante da venda de balcão.
   bool get printCounter => _printCounter;
 
+  /// Imprime uma ficha por produto pago na venda de balcão (evento).
+  bool get printTickets => _printTickets;
+
   /// Imprime o resumo ao fechar o caixa.
   bool get printCashClose => _printCashClose;
 
@@ -73,6 +78,7 @@ class Settings extends ChangeNotifier {
   void setPrintBill(bool v) => _set(() => _printBill = v, () => _store.setBool('print_bill', v));
   void setPrintOrders(bool v) => _set(() => _printOrders = v, () => _store.setBool('print_orders', v));
   void setPrintCounter(bool v) => _set(() => _printCounter = v, () => _store.setBool('print_counter', v));
+  void setPrintTickets(bool v) => _set(() => _printTickets = v, () => _store.setBool('print_tickets', v));
   void setPrintCashClose(bool v) => _set(() => _printCashClose = v, () => _store.setBool('print_cash_close', v));
   void setPrintAsText(bool v) => _set(() => _printAsText = v, () => _store.setBool('print_as_text', v));
   void setChargeOnTerminal(bool v) => _set(() => _chargeOnTerminal = v, () => _store.setBool('charge_on_terminal', v));

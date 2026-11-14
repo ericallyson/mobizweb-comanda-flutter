@@ -174,6 +174,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: s.setPrintCounter,
                   ),
                   SwitchRow(
+                    title: 'Imprimir fichas no balcão',
+                    subtitle: 'Uma ficha por produto pago, para retirada (evento)',
+                    value: s.printTickets,
+                    onChanged: s.setPrintTickets,
+                  ),
+                  SwitchRow(
                     title: 'Imprimir fechamento de caixa',
                     subtitle: 'Resumo com os valores contados',
                     value: s.printCashClose,

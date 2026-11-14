@@ -42,10 +42,15 @@ acompanhar as vendas: o app só consome a API `/api/garcom/v1`.
   quitar aparece "Conta paga" (ou "Venda recebida") e a mesa fecha.
 - **Balcão**: o mesmo cardápio, a tela "Venda de balcão" e o recebimento
   dividido em várias formas.
+- **Fichas de evento** (opcional, em Configurações): depois de receber a venda
+  de balcão, imprime uma ficha por produto pago, com o número da venda, a data
+  e a hora, o nome do produto em destaque e um código de barras (número da
+  venda seguido do código do produto). "Venda recebida" tem o botão para
+  imprimir as fichas de novo.
 - **Caixa**: abertura, suprimento, sangria, detalhes e fechamento (inclusive
   fechamento cego).
 - **Impressão na maquininha** (configurável): conta, via do pedido, venda de
-  balcão e fechamento de caixa.
+  balcão, fichas de evento e fechamento de caixa.
 
 ## Como está organizado
 
@@ -194,6 +199,25 @@ da cobrança); o fluxo login → mesas → cardápio → revisão na interface; 
 mesa aberta e o recebimento (as 9 opções da mesa, pagamento parcial e total,
 cartão pela maquininha com os campos de TEF, dinheiro com valor recebido,
 balcão em duas formas, QR do tablet e leitura do QR da comanda).
+
+## Limites conhecidos
+
+- **Preço com promoção só aparece depois de gravar.** O cardápio da API do
+  garçom traz o preço de cadastro, mas o servidor recalcula a venda com
+  promoções e tabelas de preço. Na mesa isso não aparece, porque o total é
+  sempre o do servidor. No balcão, quando o servidor grava por menos, "Venda
+  recebida" e o comprovante mostram o desconto; em dinheiro a diferença vira
+  troco, e em cartão ou Pix a tela avisa quanto foi cobrado a mais. Para o
+  valor certo aparecer ANTES de receber, o cardápio do servidor precisa
+  devolver o preço já resolvido.
+- **Código do produto na ficha.** O cardápio não envia o código (SKU) do
+  produto. Enquanto não enviar, o código de barras usa a posição do item na
+  venda (`001`, `002`…) depois do número da venda. O app já lê o campo `sku`
+  quando ele vier.
+- **Corte do papel.** A impressão da Stone por deeplink não tem comando de
+  corte. Cada ficha termina em uma linha de picote com folga para rasgar e
+  nunca é partida entre duas imagens (`PCut` em `lib/print/receipt.dart` é o
+  ponto onde o comando de corte entra quando existir).
 
 ## O que ainda não tem (em relação ao PWA)
 

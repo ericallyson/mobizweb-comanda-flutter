@@ -14,6 +14,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:mobizweb_pos/app.dart';
 import 'package:mobizweb_pos/core/storage.dart';
 import 'package:mobizweb_pos/main.dart';
+import 'package:mobizweb_pos/models/models.dart';
 import 'package:mobizweb_pos/stores/comanda_link.dart';
 import 'package:mobizweb_pos/stores/receive.dart';
 import 'package:mobizweb_pos/ui/kit.dart';
@@ -1049,5 +1050,44 @@ void main() {
       {'method': 'cash', 'amount': 50.0},
     ]);
     c.dispose();
+  });
+
+  test('balcão: servidor grava a venda por menos (promoção); mostra o desconto e o que foi cobrado a mais', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final server = _Server();
+    Future<CounterReceiveController> sale(String method) async {
+      final boot = await App.boot(
+        backend: MemoryBackend()..values['server_input'] = 'bardoze',
+        client: MockClient(server.handle),
+        probeDevice: false,
+      );
+      final c = CounterReceiveController(
+        saleTotal: 20,
+        options: [PaymentMethodOption(code: method, method: method, name: method, isCash: method == 'cash')],
+        parts: [],
+        items: const [],
+        cartKey: 'k-$method',
+        counter: boot.counter,
+        ledger: boot.ledger,
+        terminal: boot.terminal,
+      );
+      expect(c.systemDiscount, 0);
+      // O servidor falso grava a venda por R$ 14,00.
+      expect((await c.receive(amount: 20)).kind, ReceiveOutcomeKind.done);
+      return c;
+    }
+
+    // Dinheiro: a diferença vira troco no servidor, nada foi cobrado a mais.
+    final cash = await sale('cash');
+    expect(cash.sale?.total, 14);
+    expect(cash.systemDiscount, 6);
+    expect(cash.overcharged, 0);
+    cash.dispose();
+
+    // Débito: o servidor registra só o total; os R$ 6,00 a mais precisam voltar.
+    final debit = await sale('debit_card');
+    expect(debit.systemDiscount, 6);
+    expect(debit.overcharged, 6);
+    debit.dispose();
   });
 }

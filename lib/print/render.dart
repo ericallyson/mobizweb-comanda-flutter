@@ -6,6 +6,7 @@ import 'package:flutter/painting.dart';
 
 import '../core/config.dart';
 import '../stone/stone_deeplink.dart';
+import 'barcode.dart';
 import 'receipt.dart';
 
 /// Tamanhos de fonte na bobina de 58 mm (384 pontos).
@@ -13,7 +14,11 @@ double _fontSize(PSize s) => switch (s) {
   PSize.small => 20,
   PSize.medium => 24,
   PSize.big => 32,
+  PSize.huge => 44,
 };
+
+/// Nome do tamanho no deeplink da Stone (que só conhece três).
+String _stoneSize(PSize s) => s == PSize.huge ? 'big' : s.name;
 
 /// Colunas por linha no modo texto. A Stone não documenta esse número; estes
 /// valores são os usuais de térmica 58 mm (fonte A = 32, fonte B = 48).
@@ -23,26 +28,55 @@ int textColumns(PSize s) => s == PSize.small ? 48 : 32;
 
 /// Converte para itens `text`/`line` do deeplink. Mais leve que imagem, mas o
 /// alinhamento das colunas depende da fonte do terminal.
-List<StonePrintable> toStoneText(List<PLine> lines) {
+///
+/// Código de barras não existe em texto: [barcodes] traz o PNG (base64) de
+/// cada [PBarcode], na ordem em que aparecem (ver [renderBarcodesBase64]).
+/// Sem ele, o número já sai escrito na linha seguinte do documento.
+List<StonePrintable> toStoneText(List<PLine> lines, {List<String?> barcodes = const []}) {
   final out = <StonePrintable>[];
+  var barcode = 0;
   for (final l in lines) {
     switch (l) {
       case PText():
-        out.add(StonePrintable.text(l.text, align: l.align.name, size: l.size.name));
+        out.add(StonePrintable.text(l.text, align: l.align.name, size: _stoneSize(l.size)));
       case PRow():
         final cols = textColumns(l.size);
         final gap = cols - l.left.length - l.right.length;
         if (gap >= 1) {
-          out.add(StonePrintable.text('${l.left}${' ' * gap}${l.right}', size: l.size.name));
+          out.add(StonePrintable.text('${l.left}${' ' * gap}${l.right}', size: _stoneSize(l.size)));
         } else {
-          out.add(StonePrintable.text(l.left, size: l.size.name));
-          if (l.right.isNotEmpty) out.add(StonePrintable.text(l.right, align: 'right', size: l.size.name));
+          out.add(StonePrintable.text(l.left, size: _stoneSize(l.size)));
+          if (l.right.isNotEmpty) out.add(StonePrintable.text(l.right, align: 'right', size: _stoneSize(l.size)));
         }
       case PDivider():
         out.add(StonePrintable.line('-' * 32));
       case PGap():
         out.add(const StonePrintable.line(' '));
+      case PBarcode():
+        final image = barcode < barcodes.length ? barcodes[barcode] : null;
+        barcode++;
+        if (image != null) out.add(StonePrintable.image(image));
+      case PCut():
+        out
+          ..add(const StonePrintable.line(' '))
+          ..add(StonePrintable.line('- ' * 16))
+          ..add(const StonePrintable.line(' '));
     }
+  }
+  return out;
+}
+
+/// PNG (base64) de cada [PBarcode] do documento, na ordem; `null` quando o
+/// código não cabe no papel. Usado pela impressão em modo texto.
+Future<List<String?>> renderBarcodesBase64(List<PLine> lines, {int width = Config.paperWidthPx}) async {
+  final out = <String?>[];
+  for (final l in lines.whereType<PBarcode>()) {
+    if (code128ModuleWidth(l.data, width) == 0) {
+      out.add(null);
+      continue;
+    }
+    final pngs = await renderReceiptPng([l], width: width);
+    out.add(pngs.isEmpty ? null : base64Encode(pngs.first));
   }
   return out;
 }
@@ -53,9 +87,12 @@ const _ink = ui.Color(0xFF000000);
 const _paper = ui.Color(0xFFFFFFFF);
 
 class _Block {
-  _Block(this.height, this.paint);
+  _Block(this.height, this.paint, {this.cut = false});
   final double height;
   final void Function(ui.Canvas canvas, double y) paint;
+
+  /// Fim de uma via destacável ([PCut]): ponto preferido para trocar de imagem.
+  final bool cut;
 }
 
 TextPainter _tp(String text, PSize size, bool bold, double maxWidth, [TextAlign align = TextAlign.left]) {
@@ -124,9 +161,92 @@ List<_Block> _layout(List<PLine> lines, double width) {
         );
       case PGap():
         blocks.add(_Block(l.px, (_, _) {}));
+      case PBarcode():
+        final modules = code128Modules(l.data);
+        final unit = code128ModuleWidth(l.data, width.toInt());
+        // Não cabe no papel: o número sai escrito na linha seguinte.
+        if (unit == 0) break;
+        final left = ((width - modules.length * unit) / 2).floorToDouble();
+        blocks.add(
+          _Block(l.height, (c, y) {
+            final p = ui.Paint()..color = _ink;
+            // Barras vizinhas viram um retângulo só (sem fresta entre módulos).
+            var i = 0;
+            while (i < modules.length) {
+              if (!modules[i]) {
+                i++;
+                continue;
+              }
+              var j = i;
+              while (j < modules.length && modules[j]) {
+                j++;
+              }
+              c.drawRect(ui.Rect.fromLTWH(left + i * unit, y, (j - i) * unit.toDouble(), l.height), p);
+              i = j;
+            }
+          }),
+        );
+      case PCut():
+        // Linha de picote com folga em cima e embaixo para rasgar.
+        blocks.add(
+          _Block(44, (c, y) {
+            final p = ui.Paint()
+              ..color = _ink
+              ..strokeWidth = 2;
+            for (double x = 0; x < width; x += 16) {
+              c.drawLine(ui.Offset(x, y + 22), ui.Offset(x + 8, y + 22), p);
+            }
+          }, cut: true),
+        );
     }
   }
   return blocks;
+}
+
+/// Divide em imagens de até [maxHeight]. Uma via destacável (o trecho até um
+/// [PCut]) nunca é partida no meio quando cabe inteira em uma imagem; o resto
+/// quebra entre linhas.
+List<List<_Block>> _paginate(List<_Block> blocks, double maxHeight) {
+  final groups = <List<_Block>>[];
+  var group = <_Block>[];
+  for (final b in blocks) {
+    group.add(b);
+    if (b.cut) {
+      groups.add(group);
+      group = <_Block>[];
+    }
+  }
+  if (group.isNotEmpty) {
+    // O avanço de papel depois da última via acompanha essa via (não vira
+    // uma imagem só de papel em branco).
+    if (groups.isNotEmpty && group.every((b) => !b.cut)) {
+      groups.last.addAll(group);
+    } else {
+      groups.add(group);
+    }
+  }
+
+  final pages = <List<_Block>>[];
+  var current = <_Block>[];
+  var used = 0.0;
+  void close() {
+    if (current.isNotEmpty) pages.add(current);
+    current = <_Block>[];
+    used = 0;
+  }
+
+  for (final g in groups) {
+    final height = g.fold<double>(0, (a, b) => a + b.height);
+    final whole = groups.length > 1 && height <= maxHeight;
+    if (whole && used + height > maxHeight) close();
+    for (final b in g) {
+      if (!whole && current.isNotEmpty && used + b.height > maxHeight) close();
+      current.add(b);
+      used += b.height;
+    }
+  }
+  close();
+  return pages;
 }
 
 /// Renderiza o documento em PNGs de 384 px de largura, quebrando SEMPRE entre
@@ -137,20 +257,7 @@ Future<List<Uint8List>> renderReceiptPng(
   int width = Config.paperWidthPx,
   double maxHeight = 560,
 }) async {
-  final blocks = _layout(lines, width.toDouble());
-  final pages = <List<_Block>>[];
-  var current = <_Block>[];
-  var used = 0.0;
-  for (final b in blocks) {
-    if (current.isNotEmpty && used + b.height > maxHeight) {
-      pages.add(current);
-      current = <_Block>[];
-      used = 0;
-    }
-    current.add(b);
-    used += b.height;
-  }
-  if (current.isNotEmpty) pages.add(current);
+  final pages = _paginate(_layout(lines, width.toDouble()), maxHeight);
 
   final out = <Uint8List>[];
   for (final page in pages) {

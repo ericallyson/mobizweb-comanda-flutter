@@ -288,9 +288,14 @@ class MenuProduct {
     this.addonGroups = const [],
     this.pizza,
     this.comboGroups = const [],
+    this.code,
   });
   final String id;
   final String name;
+
+  /// Código (SKU) do cadastro. O cardápio do servidor ainda NÃO envia este
+  /// campo; a leitura já está pronta para quando enviar (usado na ficha).
+  final String? code;
 
   /// `simple` | `pizza` | `combo`.
   final String type;
@@ -315,6 +320,7 @@ class MenuProduct {
     addonGroups: asList(j['addon_groups']).map(AddonGroup.fromJson).toList(),
     pizza: j['pizza'] is Map ? PizzaConfig.fromJson(asMap(j['pizza'])) : null,
     comboGroups: asList(j['combo_groups']).map(ComboGroup.fromJson).toList(),
+    code: asStringOrNull(j['sku']) ?? asStringOrNull(j['code']),
   );
 }
 

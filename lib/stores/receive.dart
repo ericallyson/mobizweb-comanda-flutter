@@ -457,6 +457,32 @@ class CounterReceiveController extends ReceiveController {
   /// As partes com que a venda foi gravada.
   List<CounterPayment> salePayments = const [];
 
+  /// Quanto o servidor gravou a MENOS que a soma do cardápio (positivo =
+  /// desconto; negativo = acréscimo). O cardápio do app traz o preço de
+  /// cadastro, mas o servidor recalcula a venda com promoções e tabelas de
+  /// preço, então os dois totais podem diferir. `0` antes de registrar.
+  double get systemDiscount {
+    final s = sale;
+    return s == null ? 0 : round2(saleTotal - s.total);
+  }
+
+  /// Quanto foi cobrado em cartão, Pix ou outra forma sem troco ALÉM do que o
+  /// servidor registrou. O servidor limita essas formas ao total da venda e
+  /// só o dinheiro vira troco: esta diferença ficou com a loja e precisa
+  /// voltar ao cliente.
+  double get overcharged {
+    final s = sale;
+    if (s == null) return 0;
+    var left = s.total;
+    var over = 0.0;
+    for (final p in salePayments) {
+      final applied = p.amount < left ? p.amount : left;
+      if (p.method != 'cash') over += p.amount - applied;
+      left = round2(left - applied);
+    }
+    return round2(over);
+  }
+
   static const _cashFallback = ReceiveMethod(id: 'cash', method: 'cash', label: 'Dinheiro', isCash: true);
 
   @override

@@ -80,8 +80,35 @@ Future<bool> printCounterSale(
     payments: payments,
     total: sale.total,
     change: sale.changeAmount,
+    itemsTotal: items.fold<double>(0, (a, i) => a + i.total),
   ),
 );
+
+/// Fichas da venda de balcão: uma por produto pago.
+Future<bool> printCounterTickets(
+  BuildContext context, {
+  required CounterSaleResult sale,
+  required List<CartItem> items,
+}) => _print(context, counterTickets(number: sale.number, items: items));
+
+/// O que sai no papel depois de uma venda de balcão, UM de cada vez (a
+/// impressora só atende uma chamada por vez): comprovante e depois as fichas,
+/// conforme as opções ligadas em Configurações.
+Future<void> printAfterCounterSale(
+  BuildContext context, {
+  required CounterSaleResult sale,
+  required List<CartItem> items,
+  required List<({String label, double amount})> payments,
+  String? customerName,
+}) async {
+  if (!app.terminal.canPrint) return;
+  if (app.settings.printCounter) {
+    await printCounterSale(context, sale: sale, items: items, payments: payments, customerName: customerName);
+  }
+  if (app.settings.printTickets && context.mounted) {
+    await printCounterTickets(context, sale: sale, items: items);
+  }
+}
 
 Future<bool> printCashClose(
   BuildContext context, {

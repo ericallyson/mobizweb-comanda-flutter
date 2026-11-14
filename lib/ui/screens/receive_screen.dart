@@ -9,6 +9,7 @@ import '../../stores/counter.dart';
 import '../../stores/payments.dart';
 import '../../stores/receive.dart';
 import '../kit.dart';
+import '../printing.dart';
 import '../sheets/pix_sheet.dart';
 
 /// O que [ReceiveScreen] devolve ao fechar.
@@ -285,6 +286,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     } finally {
       if (mounted) setState(() => _printing = false);
     }
+  }
+
+  /// Fichas da venda de balcão, de novo (papel acabou, ficha rasgou).
+  Future<void> _printTickets() async {
+    final counter = _counter;
+    final sale = counter?.sale;
+    if (_printing || counter == null || sale == null) return;
+    setState(() => _printing = true);
+    await printCounterTickets(context, sale: sale, items: counter.items);
+    if (mounted) setState(() => _printing = false);
   }
 
   // ── Textos ────────────────────────────────────────────────────────────────
@@ -632,6 +643,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     );
   }
 
+  Widget _saleLine(String label, String value, {bool bold = false, Color? color}) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      children: [
+        Expanded(child: Text(label, style: T.body(w: bold ? T.semibold : FontWeight.w400, c: color ?? C.ink))),
+        Text(value, style: T.num(13.5, c: color ?? C.ink)),
+      ],
+    ),
+  );
+
   /// "Conta paga" / "Venda recebida".
   Widget _doneView() {
     final counter = _counter;
@@ -718,6 +739,42 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             ),
           ),
         ),
+        if (counter != null && counter.systemDiscount.abs() > 0.005) ...[
+          const SizedBox(height: 12),
+          CardBox(
+            padding: 0,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _saleLine('Itens pelo preço do cardápio', brl(counter.total)),
+                  _saleLine(
+                    counter.systemDiscount > 0 ? 'Desconto aplicado pelo sistema' : 'Acréscimo aplicado pelo sistema',
+                    '${counter.systemDiscount > 0 ? '-' : '+'} ${brl(counter.systemDiscount.abs())}',
+                    color: counter.systemDiscount > 0 ? C.greenText : C.orangeText,
+                  ),
+                  _saleLine('Total da venda', brl(total), bold: true),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Note(
+            'O Mobizweb gravou a venda com promoção ou tabela de preço que o cardápio do app não mostra.',
+            radius: 12,
+            kind: NoteKind.info,
+          ),
+        ],
+        if (counter != null && counter.overcharged > 0.005) ...[
+          const SizedBox(height: 12),
+          Note(
+            'Foram cobrados ${brl(counter.overcharged)} a mais do que o total da venda em cartão ou Pix. '
+            'Devolva essa diferença ao cliente.',
+            kind: NoteKind.error,
+            radius: 12,
+          ),
+        ],
         if (sale != null && sale.requiresOperatorDecision) ...[
           const SizedBox(height: 12),
           Note(
@@ -738,6 +795,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               textAlign: TextAlign.center,
               style: T.s(12, c: C.sub, h: 1.35),
             ),
+        ],
+        if (sale != null && app.settings.printTickets && app.terminal.canPrint) ...[
+          const SizedBox(height: 12),
+          Btn(
+            'Imprimir as fichas de novo',
+            kind: BtnKind.secondary,
+            icon: Icons.confirmation_number_outlined,
+            loading: _printing,
+            onTap: _printTickets,
+          ),
         ],
         if (canPrint) ...[
           const SizedBox(height: 12),

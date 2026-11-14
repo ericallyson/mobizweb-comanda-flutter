@@ -593,7 +593,11 @@ const routes = [
     ['GET', '/counter/context', () => ({ enabled: true, permissions: { sell: true }, payment_methods: paymentMethods, cash_session: cash?.status === 'open' ? { id: cash.id, opened_at: cash.opened_at } : null })],
     ['POST', '/counter/checkout', (m, b) => {
         if (!Array.isArray(b.items) || !b.items.length) throw fail(422, 'Informe ao menos um item.');
-        const total = round2(b.items.reduce((a, it) => a + priceItem(it).unit_price * Number(it.quantity), 0));
+        // MOCK_PROMO=10 simula uma promoção de 10% que o cardápio não mostra
+        // (o servidor real recalcula o preço com promoções e tabelas).
+        const promo = Number(process.env.MOCK_PROMO ?? 0);
+        const full = round2(b.items.reduce((a, it) => a + priceItem(it).unit_price * Number(it.quantity), 0));
+        const total = round2(full * (1 - promo / 100));
         const paid = round2((b.payments ?? []).reduce((a, p) => a + Number(p.amount), 0));
         if (paid < total - 0.005) throw fail(422, 'O valor recebido não cobre o total da venda.');
         for (const p of b.payments) cashHistory.payments.push({ method: p.method, amount: Math.min(Number(p.amount), total) });

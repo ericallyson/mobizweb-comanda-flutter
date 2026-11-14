@@ -252,4 +252,110 @@ void main() {
       expect(ctx.session, isNull);
     });
   });
+
+  group('fichas da venda de balcão', () {
+    const lata = MenuProduct(id: 'p1', name: 'Refrigerante lata', price: 6);
+    const picanha = MenuProduct(id: 'p2', name: 'Picanha', price: 189.9, unitOfMeasure: 'kg', allowFractionalQty: true);
+    const cerveja = MenuProduct(id: 'p3', name: 'Cerveja', price: 12, code: '7891');
+    final lines = counterTickets(
+      number: 100029,
+      when: DateTime(2026, 11, 14, 20, 32),
+      items: [
+        CartItem(localId: '1', product: lata, quantity: 2, unitPrice: 6),
+        CartItem(localId: '2', product: picanha, quantity: 0.35, unitPrice: 189.9),
+        CartItem(localId: '3', product: cerveja, quantity: 1, notes: 'bem gelada', unitPrice: 12),
+      ],
+    );
+
+    test('uma ficha por unidade paga; item por peso sai em uma ficha só', () {
+      expect(lines.whereType<PCut>().length, 4);
+      expect(lines.whereType<PBarcode>().length, 4);
+      final names = lines.whereType<PText>().where((t) => t.size == PSize.huge).map((t) => t.text).toList();
+      expect(names, ['REFRIGERANTE LATA', 'REFRIGERANTE LATA', 'PICANHA', 'CERVEJA']);
+      expect(_texts(lines), contains('0,35 kg'));
+    });
+
+    test('cada ficha traz número da venda, data e hora, produto em destaque e código de barras', () {
+      final first = lines.takeWhile((l) => l is! PCut).toList();
+      final texts = _texts(first);
+      expect(texts, containsAllInOrder(['VENDA Nº 100029', '14/11/2026 - 20:32', 'REFRIGERANTE LATA', '100029001']));
+      final name = first.whereType<PText>().firstWhere((t) => t.text == 'REFRIGERANTE LATA');
+      expect((name.size, name.bold, name.align), (PSize.huge, true, PAlign.center));
+      final stamp = first.whereType<PText>().firstWhere((t) => t.text == '14/11/2026 - 20:32');
+      expect(stamp.size, PSize.small);
+      expect(lines.last, isA<PGap>());
+    });
+
+    test('código de barras: número da venda + código do produto (SKU, ou posição do item)', () {
+      final codes = lines.whereType<PBarcode>().map((b) => b.data).toList();
+      expect(codes, ['100029001', '100029001', '100029002', '1000297891']);
+      expect(_texts(lines), contains('OBS: bem gelada'));
+    });
+
+    test('venda sem itens não imprime nada', () {
+      expect(counterTickets(number: 1, items: const []), isEmpty);
+    });
+
+    test('modo texto: código de barras vai como imagem e o picote como linha', () {
+      final out = toStoneText(lines, barcodes: const ['AAA', null, 'CCC', 'DDD']);
+      expect(out.where((p) => p.type == 'image').map((p) => p.imageBase64), ['AAA', 'CCC', 'DDD']);
+      expect(out.where((p) => p.type == 'line' && p.content!.startsWith('- -')).length, 4);
+      // O nome grande sai no maior tamanho que a Stone aceita.
+      final name = out.firstWhere((p) => p.content == 'REFRIGERANTE LATA');
+      expect((name.size, name.align), ('big', 'center'));
+    });
+
+    test('imagem: nenhuma ficha é partida entre duas imagens', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      List<PLine> tickets(double n) => counterTickets(
+        number: 100029,
+        items: [CartItem(localId: '1', product: lata, quantity: n, unitPrice: 6)],
+      );
+      // Altura do PNG (IHDR, bytes 20 a 23).
+      int height(List<int> png) => (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
+
+      final one = (await renderReceiptPng(tickets(1), maxHeight: 4000)).single;
+      final all = (await renderReceiptPng(tickets(6), maxHeight: 4000)).single;
+      final ticket = (height(all) - height(one)) ~/ 5;
+
+      // Limite em que cabem duas fichas e meia: saem duas INTEIRAS por imagem.
+      final pages = await renderReceiptPng(tickets(6), maxHeight: ticket * 2.5);
+      expect(pages.length, 3);
+      expect(pages.map(height).toSet().length, lessThanOrEqualTo(2));
+      expect(height(pages.first), ticket * 2);
+      // O avanço de papel do fim acompanha a última ficha.
+      expect(height(pages.last), ticket * 2 + (height(one) - ticket));
+
+      expect(await renderBarcodesBase64(tickets(6)), hasLength(6));
+    });
+  });
+
+  group('comprovante de balcão com preço recalculado pelo servidor', () {
+    const lata = MenuProduct(id: 'p1', name: 'Refrigerante lata', price: 6);
+    final items = [CartItem(localId: '1', product: lata, quantity: 10, unitPrice: 6)];
+
+    test('mostra subtotal e desconto quando o servidor grava por menos', () {
+      final rows = counterReceipt(
+        storeName: 'Bar',
+        items: items,
+        payments: const [(label: 'Dinheiro', amount: 60)],
+        total: 54,
+        change: 6,
+        itemsTotal: 60,
+      ).whereType<PRow>().map((r) => '${r.left}|${r.right}').toList();
+      expect(rows, containsAllInOrder(['Subtotal|R\$ 60,00', 'Desconto|- R\$ 6,00', 'TOTAL|R\$ 54,00', 'Troco|R\$ 6,00']));
+    });
+
+    test('sem diferença, o comprovante continua igual', () {
+      final rows = counterReceipt(
+        storeName: 'Bar',
+        items: items,
+        payments: const [(label: 'Dinheiro', amount: 60)],
+        total: 60,
+        itemsTotal: 60,
+      ).whereType<PRow>().map((r) => r.left).toList();
+      expect(rows, isNot(contains('Subtotal')));
+      expect(rows, isNot(contains('Desconto')));
+    });
+  });
 }

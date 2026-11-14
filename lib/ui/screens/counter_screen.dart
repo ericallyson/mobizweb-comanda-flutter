@@ -102,7 +102,7 @@ class _CounterScreenState extends State<CounterScreen> with StoreRebuild {
   }
 
   /// Venda gravada: as transações da maquininha deixam de estar pendentes, o
-  /// carrinho é zerado e o comprovante sai (se a impressão estiver ligada).
+  /// carrinho é zerado e saem o comprovante e as fichas (o que estiver ligado).
   Future<void> _sold(
     CounterSaleResult sale,
     List<CounterPayment> payments,
@@ -114,18 +114,17 @@ class _CounterScreenState extends State<CounterScreen> with StoreRebuild {
     _cart.commit();
     _syncLock();
     if (!mounted) return;
-    if (app.settings.printCounter && app.terminal.canPrint) {
-      // Sem `await`: a tela "Venda recebida" aparece enquanto o comprovante imprime.
-      unawaited(
-        printCounterSale(
-          context,
-          sale: sale,
-          items: items,
-          payments: [for (final p in payments) (label: p.label, amount: p.amount)],
-          customerName: customerName,
-        ),
-      );
-    }
+    // Sem `await`: a tela "Venda recebida" aparece enquanto o comprovante e as
+    // fichas imprimem.
+    unawaited(
+      printAfterCounterSale(
+        context,
+        sale: sale,
+        items: items,
+        payments: [for (final p in payments) (label: p.label, amount: p.amount)],
+        customerName: customerName,
+      ),
+    );
   }
 
   Future<void> _back() async {
