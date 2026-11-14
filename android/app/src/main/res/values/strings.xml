@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Textos do leitor de QR (biblioteca ZXing), em português. Os nomes são os
+      da biblioteca: um recurso do app com o mesmo nome substitui o dela.
+    -->
+    <string name="zxing_app_name">Leitor de QR</string>
+    <string name="zxing_button_ok">OK</string>
+    <string name="zxing_msg_default_status">Aponte para o QR da comanda</string>
+    <string name="zxing_msg_camera_framework_bug">Não foi possível usar a câmera. Feche o leitor e digite o código da comanda.</string>
+</resources>

@@ -94,3 +94,10 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Leitor de QR pela câmera ("Ler QR da comanda") e gerador do QR do
+    // tablet. É ZXing puro, SEM Google Play Services (proibido no terminal
+    // Stone); traz `com.google.zxing:core`. O canal fica no MainActivity.
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+}

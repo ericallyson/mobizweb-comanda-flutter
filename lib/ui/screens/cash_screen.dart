@@ -5,10 +5,15 @@ import '../../models/models.dart';
 import '../kit.dart';
 import '../printing.dart';
 
-/// Caixa: abertura, suprimento/sangria, detalhes e fechamento. Espelha
-/// `CashView.vue`. Exige conexão (sem fila offline).
+/// Caixa (seção 5.8 do layout novo): abertura, suprimento/sangria, detalhes e
+/// fechamento. É uma ABA da [HomeShell] (sem `Scaffold` próprio nem "voltar").
+/// As rotinas são as mesmas de antes ([CashStore]); exige conexão.
 class CashScreen extends StatefulWidget {
-  const CashScreen({super.key});
+  const CashScreen({super.key, this.allowed = true});
+
+  /// O operador tem alguma permissão de caixa (abrir, fechar ou movimentar)?
+  /// Sem nenhuma, a aba só explica isso e não consulta o servidor.
+  final bool allowed;
 
   @override
   State<CashScreen> createState() => _CashScreenState();
@@ -18,14 +23,13 @@ class _CashScreenState extends State<CashScreen> {
   final _opening = TextEditingController();
   final _notes = TextEditingController();
   bool _busy = false;
-  bool _details = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     app.cash.addListener(_changed);
-    app.cash.load();
+    if (widget.allowed) app.cash.load();
   }
 
   @override
@@ -57,14 +61,21 @@ class _CashScreenState extends State<CashScreen> {
     if (error == null) {
       _opening.clear();
       _notes.clear();
-      toast(context, 'Caixa aberto.');
+      toast(context, 'Caixa aberto');
     }
+  }
+
+  Future<void> _reload() async {
+    await app.cash.load();
+    if (mounted && app.cash.error == null) toast(context, 'Caixa atualizado');
   }
 
   Future<void> _movement(String type) async {
     final done = await showSheet<bool>(context, (_) => _MovementSheet(type: type));
-    if (done == true && mounted) toast(context, type == 'supply' ? 'Suprimento registrado.' : 'Sangria registrada.');
+    if (done == true && mounted) toast(context, type == 'supply' ? 'Suprimento registrado' : 'Sangria registrada');
   }
+
+  Future<void> _showDetails() => showSheet<void>(context, (_) => const _DetailsSheet());
 
   Future<void> _close() async {
     final session = app.cash.session;
@@ -84,11 +95,23 @@ class _CashScreenState extends State<CashScreen> {
       dismissible: false,
     );
     if (counted == null || !mounted) return;
-    toast(context, 'Caixa fechado.');
+    toast(context, 'Caixa fechado');
     if (app.settings.printCashClose && app.terminal.canPrint) {
       await printCashClose(context, detail: detail, counted: counted, showExpected: reveal);
     }
   }
+
+  Widget _message(String text) => Padding(
+    padding: const EdgeInsets.all(14),
+    child: CardBox(
+      padding: 24,
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: T.body(c: C.sub),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -97,40 +120,33 @@ class _CashScreenState extends State<CashScreen> {
     final session = cash.session;
 
     Widget body;
-    if (cash.loading && ctx == null) {
+    if (!widget.allowed) {
+      body = _message('Seu usuário não tem permissão para operar o caixa.');
+    } else if (cash.loading && ctx == null) {
       body = const StateView(text: 'Carregando caixa...');
     } else if (ctx == null) {
       body = StateView(text: cash.error ?? 'Não foi possível carregar o caixa.', error: true, onAction: cash.load);
     } else if (!ctx.enabled) {
-      body = const Padding(
-        padding: EdgeInsets.all(16),
-        child: CardBox(
-          padding: 24,
-          child: Text(
-            'A operação de caixa pelo PDV não está habilitada para esta loja.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: C.zinc500, height: 1.43),
-          ),
-        ),
-      );
+      body = _message('A operação de caixa pelo PDV não está habilitada para esta loja.');
     } else if (session == null) {
       body = _openForm(ctx);
     } else {
       body = _openSession(ctx, session);
     }
 
-    return Scaffold(
-      backgroundColor: C.zinc50,
-      body: Column(
+    return ColoredBox(
+      color: C.bg,
+      child: Column(
         children: [
           AppHeader(
             title: 'Caixa',
             subtitle: app.auth.store?.name,
-            onBack: () => Navigator.pop(context),
             actions: [
-              HeaderButton(icon: Icons.refresh, tooltip: 'Atualizar', spinning: cash.loading, onTap: cash.loading ? null : cash.load),
+              if (widget.allowed)
+                HeaderButton.text('Atualizar', spinning: cash.loading, onTap: cash.loading ? null : _reload),
             ],
           ),
+          if (cash.error != null && ctx != null) Note(cash.error!, kind: NoteKind.error, radius: 0),
           Expanded(child: body),
         ],
       ),
@@ -138,33 +154,35 @@ class _CashScreenState extends State<CashScreen> {
   }
 
   Widget _openForm(CashContext ctx) => ListView(
-    padding: const EdgeInsets.all(16),
+    padding: const EdgeInsets.all(14),
     children: [
       if (!ctx.canOpen)
-        const CardBox(
+        CardBox(
           padding: 24,
           child: Text(
             'Nenhum caixa aberto. Você não tem permissão para abrir o caixa.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: C.zinc500, height: 1.43),
+            style: T.body(c: C.sub),
           ),
         )
       else
         CardBox(
-          padding: 24,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Abrir caixa', style: T.base(w: T.bold)),
+              Text(
+                'Abrir caixa',
+                style: T.s(17, w: T.bold, c: C.ink, h: 1.25),
+              ),
               const SizedBox(height: 2),
-              Text('Informe o valor inicial (fundo de troco).', style: T.sm(c: C.zinc500)),
-              const SizedBox(height: 16),
+              Text('Informe o valor inicial (fundo de troco).', style: T.s(13, c: C.sub, h: 1.35)),
+              const SizedBox(height: 14),
               MoneyField(label: 'Valor de abertura (R\$)', controller: _opening),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               Field(label: 'Observações', controller: _notes, hint: 'Opcional', maxLength: 255),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               ErrText(_error),
-              Btn(_busy ? 'Abrindo...' : 'Abrir caixa', loading: _busy, onTap: _open),
+              Btn(_busy ? 'Abrindo...' : 'Abrir caixa', kind: BtnKind.navy, loading: _busy, onTap: _open),
             ],
           ),
         ),
@@ -173,144 +191,189 @@ class _CashScreenState extends State<CashScreen> {
 
   Widget _openSession(CashContext ctx, CashSession session) {
     final summary = app.cash.detail?.summary;
-    final movements = app.cash.detail?.movements ?? const <CashMovement>[];
-    final financial = ctx.canSeeFinancial;
 
-    const rows = [
-      ('supply', 'Suprimentos', true),
-      ('cash_in', 'Entradas', true),
-      ('withdrawal', 'Sangrias', false),
-      ('cash_out', 'Saídas/devoluções', false),
-    ];
-    final byType = summary?.movementsByType ?? const <String, double?>{};
-
-    Widget stat(String label, String value, [Color color = C.zinc800]) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: T.xs(c: C.zinc400)),
-        Text(value, style: T.sm(w: T.semibold, c: color)),
-      ],
+    Widget stat(String label, num? value, [Color color = C.ink]) => Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: C.white, borderRadius: BorderRadius.circular(14)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: T.s(11.5, c: C.sub, h: 1.3),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(brl(value), maxLines: 1, style: T.num(17, c: color)),
+          ),
+        ],
+      ),
     );
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       children: [
-        CardBox(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+        // Só status e data: o sistema não tem hoje um "total em caixa" único
+        // (o esperado vem por forma de pagamento), e não se cria cálculo novo.
+        HeroCard(
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(color: C.emerald100, borderRadius: BorderRadius.circular(999)),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(width: 6, height: 6, decoration: const BoxDecoration(color: C.emerald500, shape: BoxShape.circle)),
-                        const SizedBox(width: 6),
-                        Text('Caixa aberto', style: T.xs(w: T.semibold, c: C.emerald700)),
-                      ],
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(dateTimeIso(session.openedAt), style: T.xs(c: C.zinc400)),
-                ],
+              Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(color: C.mint, shape: BoxShape.circle),
               ),
-              const SizedBox(height: 14),
-              if (!financial)
-                Text('Valores ocultos para o seu perfil.', style: T.xs(c: C.zinc400))
-              else
-                ColGrid(
-                  cols: 2,
-                  gap: 12,
-                  children: [
-                    stat('Abertura', brl(session.openingAmount)),
-                    stat('Vendas', brl(summary?.ordersTotal)),
-                    if (byType.isEmpty) ...[
-                      stat('Suprimentos e entradas', brl(summary?.totalCashIn), C.emerald600),
-                      stat('Sangrias e saídas', brl(summary?.totalCashOut), C.amber600),
-                    ] else
-                      for (final (type, label, credit) in rows)
-                        stat(label, brl(byType[type]), credit ? C.emerald600 : C.amber600),
-                  ],
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Caixa aberto · ${dateTimeIso(session.openedAt)}',
+                  style: T.num(13, w: T.medium, c: C.white, h: 1.35),
                 ),
+              ),
             ],
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
+        if (!ctx.canSeeFinancial)
+          CardBox(
+            child: Text('Valores ocultos para o seu perfil.', style: T.body(c: C.sub, size: 13)),
+          )
+        else
+          ColGrid(
+            cols: 2,
+            children: [
+              stat('Abertura', session.openingAmount),
+              stat('Vendas', summary?.ordersTotal),
+              stat('Suprimentos e entradas', summary?.totalCashIn, C.greenText),
+              stat('Sangrias e saídas', summary?.totalCashOut, C.orangeText),
+            ],
+          ),
+        const SizedBox(height: 12),
         ColGrid(
           cols: 2,
-          gap: 12,
           children: [
-            if (ctx.canMove) Btn('Suprimento', kind: BtnKind.success, onTap: () => _movement('supply')),
-            if (ctx.canMove) Btn('Sangria', kind: BtnKind.warn, onTap: () => _movement('withdrawal')),
-            Btn(_details ? 'Ocultar detalhes' : 'Ver detalhes', kind: BtnKind.outline, onTap: () => setState(() => _details = !_details)),
-            if (ctx.canClose) Btn('Fechar caixa', onTap: _close),
+            if (ctx.canMove) Btn('Suprimento', kind: BtnKind.green, onTap: () => _movement('supply')),
+            if (ctx.canMove) Btn('Sangria', kind: BtnKind.orange, onTap: () => _movement('withdrawal')),
+            Btn('Ver detalhes', kind: BtnKind.secondary, onTap: _showDetails),
+            if (ctx.canClose) Btn('Fechar caixa', kind: BtnKind.navy, onTap: _close),
           ],
         ),
-        if (_details) ...[
-          if (financial && summary != null && summary.paymentsByMethod.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            CardBox(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('Recebimentos por forma', style: T.sm(w: T.bold)),
-                  const SizedBox(height: 10),
-                  for (final pm in summary.paymentsByMethod)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text.rich(
-                              TextSpan(
-                                text: pm.label,
-                                children: [TextSpan(text: ' (${pm.count})', style: T.xs(c: C.zinc400))],
-                              ),
-                              style: T.sm(c: C.zinc600),
-                            ),
-                          ),
-                          Text(brl(pm.total), style: T.sm(w: T.medium, c: C.zinc600)),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 14),
-          CardBox(
+      ],
+    );
+  }
+}
+
+/// "Ver detalhes": abertura, totais por tipo de movimento, recebimentos por
+/// forma e a lista de movimentações. Os mesmos dados que a tela antiga abria
+/// no lugar; agora numa janela por baixo.
+class _DetailsSheet extends StatelessWidget {
+  const _DetailsSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    final ctx = app.cash.context;
+    final session = app.cash.session;
+    final summary = app.cash.detail?.summary;
+    final movements = app.cash.detail?.movements ?? const <CashMovement>[];
+    final financial = ctx?.canSeeFinancial ?? false;
+    final byType = summary?.movementsByType ?? const <String, double?>{};
+
+    const types = [
+      ('supply', 'Suprimentos', true),
+      ('cash_in', 'Entradas', true),
+      ('withdrawal', 'Sangrias', false),
+      ('cash_out', 'Saídas e devoluções', false),
+    ];
+
+    Widget line(String title, String? detail, String value, {Color color = C.ink, bool last = false}) => Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        border: last ? null : const Border(bottom: BorderSide(color: C.line)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Movimentações', style: T.sm(w: T.bold)),
-                const SizedBox(height: 10),
-                if (movements.isEmpty) Text('Nenhum suprimento ou sangria.', style: T.sm(c: C.zinc400)),
-                for (final m in movements)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(m.label, style: T.sm(w: T.medium, c: m.isCredit ? C.emerald600 : C.amber600)),
-                              if (m.reason != null) Text(m.reason!, style: T.xs(c: C.zinc400)),
-                            ],
-                          ),
-                        ),
-                        Text(brl(m.amount), style: T.sm(w: T.medium, c: C.zinc700)),
-                      ],
-                    ),
-                  ),
+                Text(title, style: T.body(w: T.semibold)),
+                if (detail != null && detail.isNotEmpty) Text(detail, style: T.s(12, c: C.sub, h: 1.35)),
               ],
             ),
           ),
+          const SizedBox(width: 10),
+          Text(value, style: T.num(13.5, c: color)),
         ],
+      ),
+    );
+
+    Widget block(List<Widget> rows) => Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: CardBox(
+        color: C.bg,
+        padding: 0,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Column(children: rows),
+        ),
+      ),
+    );
+
+    return SheetBody(
+      title: 'Detalhes do caixa',
+      subtitle: session == null ? null : 'Aberto em ${dateTimeIso(session.openedAt)}',
+      children: [
+        if (!financial)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text('Valores ocultos para o seu perfil.', style: T.body(c: C.sub, size: 13)),
+          )
+        else ...[
+          block([
+            line('Abertura', null, brl(session?.openingAmount)),
+            line('Vendas', null, brl(summary?.ordersTotal), last: byType.isEmpty),
+            for (final (i, (type, label, credit)) in types.indexed)
+              if (byType.containsKey(type))
+                line(
+                  label,
+                  null,
+                  brl(byType[type]),
+                  color: credit ? C.greenText : C.orangeText,
+                  last: i == types.length - 1,
+                ),
+          ]),
+          if (summary != null && summary.paymentsByMethod.isNotEmpty) ...[
+            const SectionLabel('Recebimentos por forma'),
+            block([
+              for (final (i, pm) in summary.paymentsByMethod.indexed)
+                line(
+                  pm.label,
+                  pm.count == 1 ? '1 recebimento' : '${pm.count} recebimentos',
+                  brl(pm.total),
+                  last: i == summary.paymentsByMethod.length - 1,
+                ),
+            ]),
+          ],
+        ],
+        const SectionLabel('Movimentações'),
+        if (movements.isEmpty)
+          Text('Nenhum suprimento ou sangria.', style: T.body(c: C.sub, size: 13))
+        else
+          block([
+            for (final (i, m) in movements.indexed)
+              line(
+                m.label,
+                m.reason,
+                financial ? brl(m.amount) : '',
+                color: m.isCredit ? C.greenText : C.orangeText,
+                last: i == movements.length - 1,
+              ),
+          ]),
       ],
     );
   }
@@ -361,19 +424,21 @@ class _MovementSheetState extends State<_MovementSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final focus = _supply ? C.emerald500 : C.amber500;
+    final focus = _supply ? C.green : C.orange;
     return SheetBody(
-      padding: 24,
+      title: _supply ? 'Suprimento' : 'Sangria',
+      subtitle: _supply
+          ? 'Entrada de dinheiro no caixa (troco, fundo).'
+          : 'Retirada de dinheiro do caixa (depósito, despesa).',
       children: [
-        Text(_supply ? 'Suprimento' : 'Sangria', style: T.base(w: T.bold)),
-        const SizedBox(height: 2),
-        Text(
-          _supply ? 'Entrada de dinheiro no caixa (troco, fundo).' : 'Retirada de dinheiro do caixa (depósito, despesa).',
-          style: T.sm(c: C.zinc500),
+        MoneyField(
+          label: 'Valor (R\$)',
+          controller: _amount,
+          focus: focus,
+          autofocus: true,
+          onChanged: (_) => setState(() {}),
         ),
-        const SizedBox(height: 16),
-        MoneyField(label: 'Valor (R\$)', controller: _amount, focus: focus, autofocus: true, onChanged: (_) => setState(() {})),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
         Field(
           label: 'Motivo',
           controller: _reason,
@@ -386,10 +451,10 @@ class _MovementSheetState extends State<_MovementSheet> {
         ErrText(_error),
       ],
       footer: BtnRow(
-        Btn('Voltar', kind: BtnKind.outline, onTap: _busy ? null : () => Navigator.pop(context)),
+        Btn('Cancelar', kind: BtnKind.secondary, onTap: _busy ? null : () => Navigator.pop(context)),
         Btn(
-          _busy ? 'Salvando...' : 'Confirmar',
-          kind: _supply ? BtnKind.success : BtnKind.warn,
+          _busy ? 'Salvando...' : (_supply ? 'Confirmar suprimento' : 'Confirmar sangria'),
+          kind: _supply ? BtnKind.green : BtnKind.orange,
           loading: _busy,
           onTap: _valid ? _confirm : null,
         ),
@@ -456,17 +521,11 @@ class _CloseSheetState extends State<_CloseSheet> {
     final expected = entries.fold<double>(0, (a, e) => a + (e.total ?? 0));
     final diff = round2(counted - expected);
     return SheetBody(
-      padding: 24,
+      title: 'Fechar caixa',
+      subtitle: reveal
+          ? 'Confira os valores calculados por forma de pagamento.'
+          : 'Conte o caixa e informe os valores por forma de pagamento.',
       children: [
-        Text('Fechar caixa', style: T.base(w: T.bold)),
-        const SizedBox(height: 2),
-        Text(
-          reveal
-              ? 'Confira os valores calculados por forma de pagamento.'
-              : 'Conte o caixa e informe os valores por forma de pagamento.',
-          style: T.sm(c: C.zinc500),
-        ),
-        const SizedBox(height: 14),
         for (final e in entries)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -475,8 +534,14 @@ class _CloseSheetState extends State<_CloseSheet> {
               children: [
                 Row(
                   children: [
-                    Expanded(child: Text(e.label, style: T.sm(w: T.medium, c: C.zinc700))),
-                    if (reveal && e.total != null) Text('esperado ${brl(e.total)}', style: T.xs(c: C.zinc400)),
+                    Expanded(
+                      child: Text(e.label, style: T.body(w: T.semibold, size: 13)),
+                    ),
+                    if (reveal && e.total != null)
+                      Text(
+                        'esperado ${brl(e.total)}',
+                        style: T.num(12, w: T.medium, c: C.sub),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -492,12 +557,12 @@ class _CloseSheetState extends State<_CloseSheet> {
         const SizedBox(height: 14),
         Container(
           padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: C.zinc50, borderRadius: BorderRadius.circular(12)),
+          decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(14)),
           child: Column(
             children: [
-              _line('Total contado', brl(counted), C.zinc600, bold: true),
-              if (reveal) _line('Esperado', brl(expected), C.zinc600),
-              if (reveal) _line('Diferença', brl(diff), diff == 0 ? C.emerald600 : C.red600, bold: true),
+              _line('Total contado', brl(counted), C.ink, bold: true),
+              if (reveal) _line('Esperado', brl(expected), C.sub),
+              if (reveal) _line('Diferença', brl(diff), diff == 0 ? C.greenText : C.cancel, bold: true),
             ],
           ),
         ),
@@ -505,8 +570,8 @@ class _CloseSheetState extends State<_CloseSheet> {
         ErrText(_error),
       ],
       footer: BtnRow(
-        Btn('Voltar', kind: BtnKind.outline, onTap: _busy ? null : () => Navigator.pop(context)),
-        Btn(_busy ? 'Fechando...' : 'Fechar caixa', loading: _busy, onTap: _confirm),
+        Btn('Voltar', kind: BtnKind.secondary, onTap: _busy ? null : () => Navigator.pop(context)),
+        Btn(_busy ? 'Fechando...' : 'Fechar caixa', kind: BtnKind.navy, loading: _busy, onTap: _confirm),
       ),
     );
   }
@@ -515,8 +580,13 @@ class _CloseSheetState extends State<_CloseSheet> {
     padding: const EdgeInsets.symmetric(vertical: 2),
     child: Row(
       children: [
-        Expanded(child: Text(k, style: T.sm(c: color))),
-        Text(v, style: T.sm(w: bold ? T.semibold : FontWeight.w400, c: color)),
+        Expanded(
+          child: Text(k, style: T.body(c: color, size: 13.5)),
+        ),
+        Text(
+          v,
+          style: T.num(13.5, w: bold ? T.bold : T.medium, c: color),
+        ),
       ],
     ),
   );

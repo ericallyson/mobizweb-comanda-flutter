@@ -1,11 +1,28 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!--
-      Única permissão do app. A homologação da Stone proíbe, entre outras,
-      WAKE_LOCK, RECEIVE_BOOT_COMPLETED, WRITE_EXTERNAL_STORAGE e
-      READ_PHONE_STATE — confira o manifest mesclado a cada plugin novo
+      As DUAS permissões do app: INTERNET (API do Mobizweb) e CAMERA (só para
+      "Ler QR da comanda", pedida em tempo de execução na primeira leitura).
+      A homologação da Stone proíbe, entre outras, WAKE_LOCK,
+      RECEIVE_BOOT_COMPLETED, WRITE_EXTERNAL_STORAGE e READ_PHONE_STATE:
+      confira o manifest mesclado a cada biblioteca nova
       (tool/check-apk.sh faz essa auditoria).
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+
+    <!-- Câmera é opcional: sem ela o código da comanda é digitado. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.any" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+
+    <!--
+      Permissões que a biblioteca do leitor (ou uma dependência dela) poderia
+      trazer e o app não usa. WAKE_LOCK é proibida pela Stone.
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" tools:node="remove"/>
+    <uses-permission android:name="android.permission.VIBRATE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.FLASHLIGHT" tools:node="remove"/>
 
     <application
         android:label="Mobiz POS"
@@ -67,6 +84,21 @@
                 <data android:scheme="mobizpos" android:host="reprint"/>
             </intent-filter>
         </activity>
+        <!--
+          Leitor de QR da comanda (ZXing), em retrato como o resto do app. É
+          aberto pelo MainActivity (canal `mobiz/native`, método `scanQr`).
+        -->
+        <activity
+            android:name=".QrCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:stateNotNeeded="true"
+            android:theme="@style/zxing_CaptureTheme"
+            android:windowSoftInputMode="stateAlwaysHidden"/>
+        <!-- A tela padrão da biblioteca (paisagem) não é usada. -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            tools:node="remove"/>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

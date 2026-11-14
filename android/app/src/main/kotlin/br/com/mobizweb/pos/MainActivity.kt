@@ -1,18 +1,29 @@
 package br.com.mobizweb.pos
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.client.android.Intents
+import com.google.zxing.integration.android.IntentIntegrator
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -32,6 +43,10 @@ import javax.crypto.spec.GCMParameterSpec
  * com chave do Android Keystore). É de propósito que não há plugin para isso:
  * cada plugin a menos é APK menor e manifest mais fácil de auditar para a
  * homologação.
+ *
+ * Também por aqui passam o leitor de QR da comanda (`scanQr`, câmera) e a
+ * imagem do QR do tablet (`qrPng`), os dois com ZXing: a Stone proíbe Google
+ * Play Services no terminal, então nada de ML Kit.
  */
 class MainActivity : FlutterActivity() {
 
@@ -93,7 +108,120 @@ class MainActivity : FlutterActivity() {
                 secureWrite(call.argument<String>("key") ?: "", call.argument<String>("value"))
                 result.success(null)
             }
+            "scanQr" -> scanQr(call.argument<String>("prompt"), result)
+            "qrPng" -> qrPng(call.argument<String>("text"), call.argument<Int>("size") ?: 480, result)
             else -> result.notImplemented()
+        }
+    }
+
+    // ── QR: leitura pela câmera e imagem do código (ZXing) ──────────────────
+
+    /**
+     * Abre o leitor de QR (retrato, câmera traseira) e devolve o texto lido,
+     * `null` se o operador voltou sem ler, ou erro `no_camera` / `denied` /
+     * `busy` / `failed`. A permissão CAMERA é pedida aqui, na primeira vez.
+     */
+    private fun scanQr(prompt: String?, result: MethodChannel.Result) {
+        if (scanPending != null) {
+            result.error("busy", "O leitor de QR já está aberto.", null)
+            return
+        }
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
+            result.error("no_camera", "Este aparelho não tem câmera.", null)
+            return
+        }
+        scanPending = result
+        scanPrompt = if (prompt.isNullOrBlank()) DEFAULT_SCAN_PROMPT else prompt
+        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            openScanner()
+        } else {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
+        }
+    }
+
+    private fun openScanner() {
+        try {
+            // Sem `setCameraId`: o ZXing escolhe a câmera TRASEIRA e, se o
+            // aparelho só tiver outra, usa a que existir.
+            IntentIntegrator(this)
+                .setCaptureActivity(QrCaptureActivity::class.java)
+                .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+                .setPrompt(scanPrompt)
+                .setBeepEnabled(false)
+                .setBarcodeImageEnabled(false)
+                .setOrientationLocked(true)
+                .initiateScan()
+        } catch (e: Exception) {
+            finishScan { it.error("failed", "Não foi possível abrir a câmera.", null) }
+        }
+    }
+
+    /** Responde ao Dart uma única vez (a Activity pode ter sido recriada). */
+    private fun finishScan(answer: (MethodChannel.Result) -> Unit) {
+        val waiter = scanPending ?: return
+        scanPending = null
+        try {
+            answer(waiter)
+        } catch (_: Exception) {
+            // Canal antigo (engine recriada): não há mais quem ouça.
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_CAMERA) return
+        if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            openScanner()
+        } else {
+            finishScan { it.error("denied", "Permissão da câmera negada.", null) }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == IntentIntegrator.REQUEST_CODE) {
+            val scan = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
+            val text = scan?.contents
+            when {
+                !text.isNullOrEmpty() -> finishScan { it.success(text) }
+                data?.getBooleanExtra(Intents.Scan.MISSING_CAMERA_PERMISSION, false) == true ->
+                    finishScan { it.error("denied", "Permissão da câmera negada.", null) }
+                // Voltou sem ler.
+                else -> finishScan { it.success(null) }
+            }
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    /** PNG (preto no branco) do QR de `text`, com `size` px de lado. */
+    private fun qrPng(text: String?, size: Int, result: MethodChannel.Result) {
+        if (text.isNullOrEmpty()) {
+            result.error("invalid", "Texto vazio.", null)
+            return
+        }
+        try {
+            val side = size.coerceIn(120, 1024)
+            val hints = mapOf(
+                EncodeHintType.MARGIN to 1,
+                EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+                EncodeHintType.CHARACTER_SET to "UTF-8",
+            )
+            val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, side, side, hints)
+            val width = matrix.width
+            val height = matrix.height
+            val pixels = IntArray(width * height)
+            for (y in 0 until height) {
+                val row = y * width
+                for (x in 0 until width) pixels[row + x] = if (matrix.get(x, y)) Color.BLACK else Color.WHITE
+            }
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+            bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+            val out = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            bitmap.recycle()
+            result.success(out.toByteArray())
+        } catch (e: Exception) {
+            result.error("failed", e.message ?: "Não foi possível gerar o QR.", null)
         }
     }
 
@@ -214,6 +342,12 @@ class MainActivity : FlutterActivity() {
          * `takeOrphan` na abertura e concilia o pagamento.
          */
         private var orphan: String? = null
+
+        /** Chamada `scanQr` do Dart aguardando o leitor de QR fechar. */
+        private var scanPending: MethodChannel.Result? = null
+        private var scanPrompt: String = DEFAULT_SCAN_PROMPT
+        private const val DEFAULT_SCAN_PROMPT = "Aponte para o QR da comanda"
+        private const val REQUEST_CAMERA = 0x51
 
         /** O mesmo `android:scheme` dos intent-filters do AndroidManifest. */
         private const val RETURN_SCHEME = "mobizpos"

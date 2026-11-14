@@ -35,8 +35,11 @@ else
 fi
 if [[ "$VNAME" =~ ^[0-9.]{1,12}$ ]]; then ok "versionName $VNAME / versionCode $VCODE"; else bad "versionName '$VNAME' deve ter só números e ponto (máx. 12)"; fi
 
-# 3. Permissões: só as que o app declara de propósito.
-ALLOWED='android.permission.INTERNET'
+# 3. Permissões: só as que o app declara de propósito. INTERNET (API) e
+# CAMERA (leitor de QR da comanda; a Stone não proíbe). Qualquer outra que uma
+# biblioteca traga (WAKE_LOCK, VIBRATE, FLASHLIGHT...) reprova o APK.
+ALLOWED='android.permission.INTERNET
+android.permission.CAMERA'
 PERMS=$(sed -n "s/^uses-permission: name='\([^']*\)'.*/\1/p" <<<"$BADGING")
 for p in $PERMS; do
   if grep -qx "$p" <<<"$ALLOWED" || [[ "$p" == "$PKG."* ]]; then ok "permissão $p"; else bad "permissão não prevista: $p (a Stone tem lista de proibidas)"; fi

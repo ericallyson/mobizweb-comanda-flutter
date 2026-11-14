@@ -46,15 +46,14 @@ Future<bool> printComandaBill(BuildContext context, Comanda comanda) async {
   );
 }
 
-/// Via do pedido recém-enviado.
-Future<bool> printOrderTicket(
-  BuildContext context, {
+/// Via do pedido recém-enviado. Devolve a mensagem de erro da impressora, ou
+/// `null` se imprimiu: quem chama mostra o erro na janela "Pedido na cozinha".
+Future<String?> printOrderTicket({
   required String tableLabel,
   String? comandaLabel,
   String? customerName,
   required List<CartItem> items,
-}) => _print(
-  context,
+}) => app.terminal.printLines(
   orderTicket(
     tableLabel: tableLabel.toUpperCase(),
     comandaLabel: comandaLabel,

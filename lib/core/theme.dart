@@ -1,9 +1,54 @@
 import 'package:material_ui/material_ui.dart';
 
-/// Paleta do Mobiz — a mesma do PWA do garçom (`apps/garcom-pwa/src/style.css`
-/// + escala zinc/emerald/red/orange/blue/amber do Tailwind). Se mudar lá, mude
-/// aqui: o app precisa parecer a comanda.
+/// Paleta do Mobiz.
+///
+/// Os nomes curtos do começo (`navy`, `magenta`, `bg`, `ink`…) são os tokens
+/// do layout novo do app do garçom (seção 3.1 de `docs/layout-novo.md`): as
+/// telas novas usam SÓ eles. As escalas de baixo (primary/zinc/emerald…) vêm
+/// do PWA e continuam aqui para as telas que ainda não foram refeitas e para
+/// as cores de status de mesa, que não mudam.
 abstract final class C {
+  // ── Tokens do layout novo ────────────────────────────────────────────────
+  /// Topo das telas, "Pedir conta", "Fechar caixa", aba selecionada.
+  static const navy = Color(0xFF080A52);
+
+  /// Ação principal (Revisar, Enviar para cozinha, Receber, Entrar).
+  static const magenta = Color(0xFFED2188);
+
+  /// "+ Itens", "Suprimento".
+  static const green = Color(0xFF00A874);
+
+  /// "Sangria".
+  static const orange = Color(0xFFF2600C);
+
+  /// Fundo das telas.
+  static const bg = Color(0xFFF4F3FB);
+
+  /// Texto principal e fundo do aviso (toast).
+  static const ink = Color(0xFF05061F);
+
+  /// Texto secundário.
+  static const sub = Color(0xFF6B6D92);
+
+  /// Linhas divisórias e contorno do botão secundário.
+  static const line = Color(0xFFE6E4F3);
+
+  /// "Cancelar mesa", "Cancelar item", "Sair" e quantidade crítica: só texto.
+  static const cancel = Color(0xFFC62828);
+
+  /// Subtítulo sobre o navy.
+  static const navySub = Color(0xFFB9BBE6);
+
+  /// Valores positivos (entradas) e negativos (saídas) em texto.
+  static const greenText = Color(0xFF0A7A55);
+  static const orangeText = Color(0xFFC45200);
+
+  /// Etiqueta rosa (contadores) e bolinha de "aberto".
+  static const magentaSoft = Color(0xFFFFE1F0);
+  static const magentaText = Color(0xFFB0105F);
+  static const greenSoft = Color(0xFFDCFAEE);
+  static const mint = Color(0xFF00D294);
+
   // Primary — navy
   static const primary50 = Color(0xFFF0F0F9);
   static const primary100 = Color(0xFFD4D5E8);
@@ -77,10 +122,57 @@ abstract final class C {
   static const green700 = Color(0xFF15803D);
 }
 
-/// Escala tipográfica do Tailwind usada no PWA (text-xs … text-3xl).
+/// Algarismos de largura fixa: valores em coluna não "dançam" ao mudar.
+const tabularFigures = [FontFeature.tabularFigures()];
+
+/// Tipografia. A fonte é a do sistema (o app não embarca fonte). Os estilos
+/// do layout novo (seção 3.2 do plano) são `top`, `topSub`, `body`, `section`
+/// e `num`; a escala xs…xl é a antiga, das telas ainda não refeitas.
 abstract final class T {
   static TextStyle s(double size, {FontWeight w = FontWeight.w400, Color c = C.zinc800, double? h}) =>
       TextStyle(fontSize: size, fontWeight: w, color: c, height: h, letterSpacing: 0);
+
+  /// Título do topo navy: 17 px semibold.
+  static const top = TextStyle(
+    fontSize: 17,
+    fontWeight: FontWeight.w600,
+    color: C.white,
+    height: 1.25,
+    letterSpacing: 0,
+  );
+
+  /// Subtítulo do topo navy.
+  static const topSub = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    color: C.navySub,
+    height: 1.3,
+    letterSpacing: 0,
+  );
+
+  /// Texto de tela: 14 px.
+  static TextStyle body({FontWeight w = FontWeight.w400, Color c = C.ink, double size = 14}) =>
+      s(size, w: w, c: c, h: 1.4);
+
+  /// Rótulo de seção: 10,5 px em maiúsculas com espaçamento de letras
+  /// (passe o texto já em maiúsculas ou use [SectionLabel]).
+  static const section = TextStyle(
+    fontSize: 10.5,
+    fontWeight: FontWeight.w600,
+    color: C.sub,
+    height: 1.3,
+    letterSpacing: 1.4,
+  );
+
+  /// Valor em dinheiro/quantidade: algarismos tabulares.
+  static TextStyle num(double size, {FontWeight w = FontWeight.w700, Color c = C.ink, double? h}) => TextStyle(
+    fontSize: size,
+    fontWeight: w,
+    color: c,
+    height: h ?? 1.25,
+    letterSpacing: 0,
+    fontFeatures: tabularFigures,
+  );
 
   static TextStyle xs({FontWeight w = FontWeight.w400, Color c = C.zinc800}) => s(12, w: w, c: c, h: 1.33);
   static TextStyle sm({FontWeight w = FontWeight.w400, Color c = C.zinc800}) => s(14, w: w, c: c, h: 1.43);
@@ -88,14 +180,8 @@ abstract final class T {
   static TextStyle lg({FontWeight w = FontWeight.w400, Color c = C.zinc800}) => s(18, w: w, c: c, h: 1.35);
   static TextStyle xl({FontWeight w = FontWeight.w400, Color c = C.zinc800}) => s(20, w: w, c: c, h: 1.3);
 
-  /// Rótulo de campo: `text-xs font-semibold tracking-wide uppercase text-zinc-500`.
-  static const label = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.w600,
-    color: C.zinc500,
-    letterSpacing: 0.3,
-    height: 1.33,
-  );
+  /// Rótulo de campo: o mesmo estilo de [section].
+  static const label = section;
 
   static const medium = FontWeight.w500;
   static const semibold = FontWeight.w600;
@@ -114,7 +200,7 @@ ThemeData buildTheme() {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
-    scaffoldBackgroundColor: C.zinc50,
+    scaffoldBackgroundColor: C.bg,
     splashFactory: InkRipple.splashFactory,
     textSelectionTheme: const TextSelectionThemeData(
       cursorColor: C.primary500,

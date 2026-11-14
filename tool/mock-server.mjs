@@ -75,7 +75,9 @@ menu.push(
 const allProducts = () => menu.flatMap((c) => c.products);
 
 // ── Estado ──────────────────────────────────────────────────────────────────
-const stores = [{ id: randomUUID(), name: 'Restaurante Demo' }];
+// A primeira é a loja ativa no login; as outras servem para testar "Trocar loja".
+const stores = ['Restaurante Demo', 'Demo Shopping', 'Demo Praia'].map((name) => ({ id: randomUUID(), name }));
+let activeStore = stores[0];
 const user = { id: randomUUID(), name: 'Ana Operadora', email: 'ana@demo.com' };
 const PERMS = Object.fromEntries([
     'transfer_table', 'transfer_item', 'reopen_session', 'cancel_session', 'cancel_item', 'manage_comanda', 'process_payment',
@@ -84,12 +86,73 @@ const PERMS = Object.fromEntries([
 ].map((k) => [k, true]));
 const SERVICE_FEE = 10;
 const areas = [{ id: randomUUID(), name: 'Salão' }, { id: randomUUID(), name: 'Varanda' }];
-const tables = Array.from({ length: 14 }, (_, i) => ({
+// 24 mesas: o critério de aceite do mapa é caberem todas em 390 × 844.
+const tables = Array.from({ length: 24 }, (_, i) => ({
     id: randomUUID(), number: String(i + 1), label: `Mesa ${i + 1}`, type: 'M', is_comanda: false, seats: 4,
-    area: areas[i < 9 ? 0 : 1], reserved: i === 6,
+    area: areas[i < 16 ? 0 : 1], reserved: i === 19,
 }));
 for (const n of [101, 102, 103]) tables.push({ id: randomUUID(), number: String(n), label: `Comanda ${n}`, type: 'C', is_comanda: true, seats: 1, area: null });
 const sessions = new Map();
+
+// Mesas já em atendimento ao subir o servidor, para o mapa nascer com todos
+// os status: ocupada, fechando e ociosa (sem lançamento há mais que o limite).
+const IDLE_ALERT_MINUTES = 30;
+const minutesAgo = (m) => new Date(Date.now() - m * 60000).toISOString();
+function seedSession(number, { status = 'open', customer = null, guests = 2, idleFor = 5, items = [], unassigned = false }) {
+    const t = tables.find((x) => x.number === String(number));
+    const s = {
+        id: randomUUID(), table_id: t.id, status, opened_at: minutesAgo(idleFor + 20), last_activity_at: minutesAgo(idleFor),
+        guest_count: guests, customer_name: customer, items: [], payments: [],
+        comandas: unassigned ? [{ id: randomUUID(), label: '1', status: 'open' }] : [], couvert: null, fee_removed: false,
+    };
+    for (const [name, quantity] of items) {
+        const p = allProducts().find((x) => x.name === name);
+        s.items.push({ id: randomUUID(), order_id: randomUUID(), comanda_id: null, product_name: p.name, quantity, unit_price: p.price, notes: null, status: 'pending', cancellation_reason: null, created_at: s.opened_at, selected_flavors: [], addons: [] });
+    }
+    sessions.set(s.id, s);
+    return s;
+}
+seedSession(2, { guests: 4, items: [['X-Salada', 2], ['Refrigerante lata', 2], ['Batata frita', 1], ['Long neck', 2]] });
+seedSession(3, { customer: 'Jefferson', items: [['Chopp 300ml', 4], ['Isca de frango', 1], ['Batata frita', 1]] });
+seedSession(5, { status: 'closing', guests: 3, items: [['X-Salada', 1], ['Suco natural', 3], ['Pudim', 2], ['Isca de frango', 1]] });
+seedSession(9, { idleFor: 48, items: [['Refrigerante lata', 2]] });
+seedSession(12, { customer: 'Maria Aparecida de Souza', guests: 5, items: [['Long neck', 3], ['Petit gâteau', 1]], unassigned: true });
+seedSession(14, { status: 'closing', customer: 'Carlos', items: [['Misto quente', 2], ['Chopp 300ml', 2], ['Isca de frango', 1]] });
+seedSession(18, { guests: 6, items: [['X-Salada', 2], ['Refrigerante lata', 4], ['Batata frita', 2], ['Pudim', 1]] });
+
+// Sino: chamados feitos no tablet da mesa, pedidos do tablet aguardando
+// liberação e estoque crítico (`GET /tablet/calls`).
+const tableByNumber = (n) => tables.find((x) => x.number === String(n));
+const sessionOfTable = (t) => [...sessions.values()].find((x) => x.table_id === t.id && ['open', 'closing'].includes(x.status));
+const waiterCalls = [
+    { id: randomUUID(), table: tableByNumber(3), reason: 'waiter', reason_label: 'Chamar garçom', note: null, status: 'open', created_at: minutesAgo(2) },
+    { id: randomUUID(), table: tableByNumber(18), reason: 'missing', reason_label: 'Faltou algo no pedido', note: 'Faltou o molho', status: 'open', created_at: minutesAgo(7) },
+];
+const tabletOrders = [
+    { id: randomUUID(), table: tableByNumber(2), items: [{ name: 'Água mineral', quantity: 2 }, { name: 'Pudim', quantity: 1 }], created_at: minutesAgo(1) },
+];
+const lowStock = [
+    { id: randomUUID(), name: 'Bacon fatiado', unit: 'kg', current_stock: -300, min_stock: 1, kind: 'ingredient' },
+    { id: randomUUID(), name: 'Queijo cheddar', unit: 'kg', current_stock: -200, min_stock: 1, kind: 'ingredient' },
+    { id: randomUUID(), name: 'Carne moída 150 g', unit: 'un', current_stock: -37, min_stock: 20, kind: 'ingredient' },
+    { id: randomUUID(), name: 'Pão de hambúrguer', unit: 'un', current_stock: -37, min_stock: 20, kind: 'ingredient' },
+    { id: randomUUID(), name: 'Pão brioche', unit: 'un', current_stock: 0, min_stock: 20, kind: 'product' },
+];
+const elapsed = (iso) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+const pendingByTable = () => {
+    const out = {};
+    for (const c of waiterCalls) out[c.table.id] = (out[c.table.id] ?? 0) + 1;
+    return out;
+};
+// Comanda (cartão) → sessão da mesa em que foi vinculada.
+const comandaLinks = new Map();
+const findCard = (code) => tables.find((t) => t.is_comanda && t.number === String(code ?? '').trim());
+const presentLink = (card) => {
+    const s = sessions.get(comandaLinks.get(card.id));
+    if (!s || !['open', 'closing'].includes(s.status)) return null;
+    const t = tables.find((x) => x.id === s.table_id);
+    return { comanda_id: randomUUID(), label: card.number, table_session_id: s.id, table_id: t.id, table_number: t.number };
+};
 const paymentMethods = [
     { id: randomUUID(), name: 'Dinheiro', code: 'especie', method: 'cash', icon: null, is_default: true, is_cash: true },
     { id: randomUUID(), name: 'Crédito', code: 'card_credit', method: 'credit_card', icon: null, is_default: false, is_cash: false },
@@ -277,23 +340,24 @@ const routes = [
         if (b.password !== '123456') throw fail(401, 'Credenciais inválidas.');
         const token = `mock|${randomUUID()}`;
         tokens.add(token);
-        return { token, user: { ...user, email: b.email || user.email }, store: stores[0], stores, permissions: PERMS };
+        activeStore = stores[0];
+        return { token, user: { ...user, email: b.email || user.email }, store: activeStore, stores, permissions: PERMS };
     }, true],
     ['GET', '/ping', () => ({ ok: true }), true],
     ['POST', '/auth/logout', () => ({})],
     ['GET', '/auth/me', () => ({ user, permissions: PERMS })],
-    ['POST', '/stores/:id/select', (m) => ({ store: need(stores.find((s) => s.id === m.id), 'Loja') })],
+    ['POST', '/stores/:id/select', (m) => { activeStore = need(stores.find((s) => s.id === m.id), 'Loja'); return { store: activeStore }; }],
     ['GET', '/menu', () => ({ categories: menu })],
     ['GET', '/payment-methods', () => ({ payment_methods: paymentMethods, pix_online: { code: 'mp_pix', label: 'Pix Mercado Pago' } })],
     ['GET', '/tables', () => ({
-        settings: { enable_comandas: true, idle_alert_minutes: 30 },
+        settings: { enable_comandas: true, idle_alert_minutes: IDLE_ALERT_MINUTES },
         tables: tables.map((t) => {
             const [status, s] = tableStatus(t);
             const b = s && billOf(s);
             return {
                 id: t.id, number: t.number, label: t.label, is_comanda: t.is_comanda, type: t.type, seats: t.seats, status, area: t.area,
                 session: s && { id: s.id, opened_at: s.opened_at, last_activity_at: s.last_activity_at, guest_count: s.guest_count, customer_name: s.customer_name, opened_by_name: user.name, status: s.status, total: b.total, items_subtotal: b.items_subtotal, service_fee: b.service_fee, service_fee_percentage: b.service_fee_percentage },
-                pending_calls: 0,
+                pending_calls: pendingByTable()[t.id] ?? 0,
                 has_unassigned_items: !!s && s.comandas.some((c) => ['open', 'closing'].includes(c.status)) && s.items.some((i) => i.status !== 'canceled' && !i.comanda_id),
             };
         }),
@@ -464,6 +528,58 @@ const routes = [
         cashHistory.orders = 0;
         cashHistory.ordersTotal = 0;
         return { session: cashDto() };
+    }],
+    // ── Sino e "Ler QR da comanda" (mesmos endpoints do PWA) ──
+    ['GET', '/tablet/calls', () => ({
+        calls: waiterCalls.map((c) => ({
+            id: c.id, table_id: c.table.id, table_number: c.table.number, table_label: c.table.label,
+            table_session_id: sessionOfTable(c.table)?.id ?? null, reason: c.reason, reason_label: c.reason_label,
+            status: c.status, note: c.note, created_at: c.created_at, elapsed_seconds: elapsed(c.created_at), opened_by: user.name,
+        })),
+        pending_orders: tabletOrders.map((o) => ({
+            id: o.id, table_id: o.table.id, table_number: o.table.number, table_label: o.table.label, items: o.items,
+            created_at: o.created_at, elapsed_seconds: elapsed(o.created_at),
+        })),
+        pending_by_table: pendingByTable(),
+        low_stock_alerts: lowStock,
+    })],
+    ['POST', '/tablet/calls/:id/ack', (m) => { need(waiterCalls.find((c) => c.id === m.id), 'Chamado').status = 'acknowledged'; return { ok: true }; }],
+    ['POST', '/tablet/calls/:id/resolve', (m) => {
+        const i = waiterCalls.findIndex((c) => c.id === m.id);
+        if (i >= 0) waiterCalls.splice(i, 1);
+        return { ok: true };
+    }],
+    ['POST', '/tablet/orders/:id/approve', (m) => {
+        const i = tabletOrders.findIndex((o) => o.id === m.id);
+        if (i < 0) throw Object.assign(new Error('Pedido já liberado.'), { status: 409, body: { message: 'Pedido já liberado.' } });
+        tabletOrders.splice(i, 1);
+        return { ok: true, message: 'Pedido liberado para a cozinha.' };
+    }],
+    ['POST', '/tablet/comandas/lookup', (m, b) => {
+        const card = findCard(b.code);
+        if (!card) throw Object.assign(new Error('Comanda não encontrada nesta loja.'), { status: 404, body: { message: 'Comanda não encontrada nesta loja.' } });
+        const link = presentLink(card);
+        return { comanda_table: { id: card.id, number: card.number, label: card.number }, linked: !!link, link };
+    }],
+    ['POST', '/tablet/comandas/link', (m, b) => {
+        const card = findCard(b.code);
+        if (!card) throw Object.assign(new Error('Comanda não encontrada nesta loja.'), { status: 404, body: { message: 'Comanda não encontrada nesta loja.' } });
+        const t = tables.find((x) => x.id === b.table_id && !x.is_comanda);
+        if (!t) throw Object.assign(new Error('Mesa não encontrada nesta loja.'), { status: 404, body: { message: 'Mesa não encontrada nesta loja.' } });
+        const existing = presentLink(card);
+        if (existing) {
+            if (existing.table_id === t.id) return { link: existing, already_linked: true };
+            const message = `Esta comanda já está vinculada à mesa ${existing.table_number}. Feche-a antes de vincular a outra.`;
+            throw Object.assign(new Error(message), { status: 409, body: { message } });
+        }
+        let s = sessionOfTable(t);
+        if (!s) {
+            s = { id: randomUUID(), table_id: t.id, status: 'open', opened_at: now(), last_activity_at: now(), guest_count: null, customer_name: null, items: [], payments: [], comandas: [], couvert: null, fee_removed: false };
+            sessions.set(s.id, s);
+        }
+        s.comandas.push({ id: randomUUID(), label: card.number, status: 'open' });
+        comandaLinks.set(card.id, s.id);
+        return { link: presentLink(card) };
     }],
     ['GET', '/counter/context', () => ({ enabled: true, permissions: { sell: true }, payment_methods: paymentMethods, cash_session: cash?.status === 'open' ? { id: cash.id, opened_at: cash.opened_at } : null })],
     ['POST', '/counter/checkout', (m, b) => {

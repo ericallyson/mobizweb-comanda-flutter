@@ -3,9 +3,9 @@ import 'package:material_ui/material_ui.dart';
 
 import 'app.dart';
 import 'ui/kit.dart';
+import 'ui/screens/home_shell.dart';
 import 'ui/screens/login_screen.dart';
 import 'ui/screens/store_picker_screen.dart';
-import 'ui/screens/tables_screen.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 
@@ -25,7 +25,7 @@ Future<void> previewPrint(List<Uint8List> pngs) async {
     ctx,
     (c) => SheetBody(
       title: 'Prévia da impressão',
-      subtitle: 'Modo demonstração — nada foi impresso',
+      subtitle: 'Modo demonstração: nada foi impresso.',
       children: [
         Container(
           color: C.zinc100,
@@ -33,7 +33,7 @@ Future<void> previewPrint(List<Uint8List> pngs) async {
           child: Column(children: [for (final p in pngs) Image.memory(p, filterQuality: FilterQuality.none)]),
         ),
       ],
-      footer: Btn('Fechar', kind: BtnKind.outline, onTap: () => Navigator.pop(c)),
+      footer: Btn('Fechar', kind: BtnKind.secondary, onTap: () => Navigator.pop(c)),
     ),
   );
 }
@@ -61,7 +61,8 @@ class MobizApp extends StatelessWidget {
   );
 }
 
-/// Decide a tela raiz pelo estado da sessão: login → escolha de loja → mesas.
+/// Decide a tela raiz pelo estado da sessão: login → escolha de loja → casca
+/// com o menu inferior (mesas).
 /// Quando o servidor revoga o token (401), volta sozinho para o login.
 class RootGate extends StatefulWidget {
   const RootGate({super.key});
@@ -101,6 +102,6 @@ class _RootGateState extends State<RootGate> {
     final auth = app.auth;
     if (!auth.isAuthenticated) return const LoginScreen();
     if (auth.store == null) return const StorePickerScreen();
-    return const TablesScreen();
+    return const HomeShell();
   }
 }

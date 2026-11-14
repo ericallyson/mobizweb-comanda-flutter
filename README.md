@@ -15,8 +15,14 @@ acompanhar as vendas: o app só consome a API `/api/garcom/v1`.
 
 - **Login** com o endereço da loja (subdomínio do tenant), e-mail e senha;
   escolha/troca de loja; permissões do operador vindas do servidor.
-- **Mesas**: mapa com status (livre, ocupada, fechando, reservada, ociosa),
-  busca, filtros, abas Mesas/Comandas, grade de 2/3/4 colunas, ordenação.
+- **Menu inferior** com nome em cada aba: Mesas, Balcão, Caixa e Mais.
+- **Mesas**: mapa em grade de 4 colunas com a cor do status (livre, ocupada,
+  fechando, reservada, ociosa), busca com botão "Entrar" (abre direto a mesa
+  ou comanda digitada), chips de filtro com contagem e abas Mesas/Comandas.
+- **Notificações** (sino): chamados e pedidos feitos no tablet da mesa e
+  estoque crítico, atualizados a cada 30 s.
+- **Mais**: notificações, ler QR da comanda (código digitado, sem câmera),
+  atualizar, trocar loja, configurações e sair.
 - **Mesa aberta**: cardápio em categorias com busca, produto com adicionais
   (mínimo/máximo, repetição), pizza de vários sabores, combo e venda por peso;
   carrinho; envio para a cozinha; itens lançados; cancelar e transferir item;
@@ -41,10 +47,12 @@ lib/
   stores/    estado: auth, mesas, cardápio, sessão/comandas, caixa, balcão, pagamentos
   stone/     deeplinks da Stone (URIs + respostas) e o serviço do terminal
   print/     layouts dos documentos e renderização para a bobina
-  ui/        kit visual, telas e folhas (mesmas cores e blocos do PWA)
+  ui/        kit visual (layout novo do garçom), telas e folhas
 android/     MainActivity.kt = ponte dos deeplinks + preferências + token cifrado
 tool/        build, deploy, verificação do APK, servidor falso e prévia
 docs/stone.md  integração, instalação na maquininha e checklist de homologação
+docs/layout-novo.md  layout novo do garçom: componentes, tabela "ação → rotina
+               existente" e o que ainda falta trocar
 ```
 
 Escolhas que valem saber:

@@ -88,7 +88,7 @@ class SessionStore extends ChangeNotifier {
       if (_loadingId != sessionId) return;
       if (session?.id != sessionId) {
         session = null;
-        error = e.isNetwork ? 'Sem conexão — não foi possível carregar a comanda.' : 'Não foi possível carregar a comanda.';
+        error = e.isNetwork ? 'Sem conexão. Não foi possível carregar a comanda.' : 'Não foi possível carregar a comanda.';
       }
     } finally {
       if (_loadingId == sessionId) {
@@ -136,7 +136,7 @@ class SessionStore extends ChangeNotifier {
     } on ApiException catch (e) {
       if (e.isTransient) {
         return const SendCartResult(
-          error: 'Sem resposta do servidor. Toque em Enviar de novo — o pedido não será duplicado.',
+          error: 'Sem resposta do servidor. Toque em Enviar de novo: o pedido não será duplicado.',
         );
       }
       final reason = e.isValidation ? Api.reasonOf(e.body) : null;
@@ -204,6 +204,15 @@ class SessionStore extends ChangeNotifier {
     () => _api.post('/sessions/${session!.id}/transfer', body: {'target_table_id': targetTableId}),
     refetch: false,
   );
+
+  /// "Gerar QR do tablet na mesa": código de 6 dígitos que o cliente lê ou
+  /// digita no tablet para abrir esta mesa nele. Gerar de novo substitui o
+  /// código anterior. Mesma rota do PWA (`TabletCodeModal.vue`). Lança
+  /// [ApiException].
+  Future<({String code, String? tableNumber})> generateTabletCode() async {
+    final data = await _api.post('/sessions/${session!.id}/tablet-code');
+    return (code: asString(data['code']), tableNumber: asStringOrNull(data['table_number']));
+  }
 
   // ── Couvert ───────────────────────────────────────────────────────────────
 

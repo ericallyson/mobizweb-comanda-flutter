@@ -72,7 +72,7 @@ class _OpenTableSheetState extends State<OpenTableSheet> {
       Field(
         label: 'Nome do cliente',
         controller: _customer,
-        hint: 'Opcional — aparece na mesa e nas impressões',
+        hint: 'Opcional. Aparece na mesa e nas impressões',
         maxLength: 120,
       ),
       if (widget.enableComandas) ...[

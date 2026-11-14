@@ -1037,3 +1037,133 @@ class CounterSaleResult {
     );
   }
 }
+
+// ── Notificações (sino) ──────────────────────────────────────────────────────
+
+/// Solicitação feita pelo cliente no tablet da mesa (chamar garçom, faltou
+/// algo, pedir a conta, vincular comanda). `GET /tablet/calls`.
+class TabletCall {
+  const TabletCall({
+    required this.id,
+    required this.tableId,
+    required this.tableLabel,
+    this.tableSessionId,
+    required this.reasonLabel,
+    this.status = 'open',
+    this.note,
+    this.createdAt,
+    this.elapsedSeconds = 0,
+  });
+  final String id;
+  final String tableId;
+  final String tableLabel;
+  final String? tableSessionId;
+  final String reasonLabel;
+
+  /// `open` | `acknowledged` ("a caminho").
+  final String status;
+  final String? note;
+  final String? createdAt;
+
+  /// Tempo decorrido NO MOMENTO DA RESPOSTA; o relógio local segue daqui.
+  final int elapsedSeconds;
+
+  bool get isAcknowledged => status == 'acknowledged';
+
+  TabletCall acknowledged() => TabletCall(
+    id: id,
+    tableId: tableId,
+    tableLabel: tableLabel,
+    tableSessionId: tableSessionId,
+    reasonLabel: reasonLabel,
+    status: 'acknowledged',
+    note: note,
+    createdAt: createdAt,
+    elapsedSeconds: elapsedSeconds,
+  );
+
+  factory TabletCall.fromJson(Json j) => TabletCall(
+    id: asString(j['id']),
+    tableId: asString(j['table_id']),
+    tableLabel: asString(j['table_label'], asString(j['table_number'])),
+    tableSessionId: asStringOrNull(j['table_session_id']),
+    reasonLabel: asString(j['reason_label'], asString(j['reason'])),
+    status: asString(j['status'], 'open'),
+    note: asStringOrNull(j['note']),
+    createdAt: asStringOrNull(j['created_at']),
+    elapsedSeconds: asInt(j['elapsed_seconds']),
+  );
+}
+
+/// Pedido feito no tablet aguardando liberação do garçom, como vem na lista
+/// do sino (`pending_orders` de `GET /tablet/calls`).
+class TabletOrderNotice {
+  const TabletOrderNotice({
+    required this.id,
+    this.tableId,
+    required this.tableLabel,
+    this.items = const [],
+    this.createdAt,
+    this.elapsedSeconds = 0,
+  });
+  final String id;
+  final String? tableId;
+  final String tableLabel;
+  final List<({String name, double quantity})> items;
+  final String? createdAt;
+  final int elapsedSeconds;
+
+  factory TabletOrderNotice.fromJson(Json j) => TabletOrderNotice(
+    id: asString(j['id']),
+    tableId: asStringOrNull(j['table_id']),
+    tableLabel: asStringOrNull(j['table_label']) ?? asString(j['table_number']),
+    items: [for (final i in asList(j['items'])) (name: asString(i['name']), quantity: asDouble(i['quantity'], 1))],
+    createdAt: asStringOrNull(j['created_at']),
+    elapsedSeconds: asInt(j['elapsed_seconds']),
+  );
+}
+
+/// Item abaixo do estoque mínimo na loja ativa. Só informativo: não entra no
+/// número do sino porque o garçom não "atende" estoque.
+class LowStockAlert {
+  const LowStockAlert({
+    required this.id,
+    required this.name,
+    this.unit = 'un',
+    this.currentStock = 0,
+    this.minStock = 0,
+    this.kind = 'ingredient',
+  });
+  final String id;
+  final String name;
+  final String unit;
+  final double currentStock;
+  final double minStock;
+  final String kind;
+
+  factory LowStockAlert.fromJson(Json j) => LowStockAlert(
+    id: asString(j['id']),
+    name: asString(j['name']),
+    unit: asString(j['unit'], 'un'),
+    currentStock: asDouble(j['current_stock']),
+    minStock: asDouble(j['min_stock']),
+    kind: asString(j['kind'], 'ingredient'),
+  );
+}
+
+// ── Ler QR da comanda ────────────────────────────────────────────────────────
+
+/// Resposta de `POST /tablet/comandas/lookup`: a comanda (cartão) e, se já
+/// estiver em uso, em que mesa ela está.
+class ComandaLookup {
+  const ComandaLookup({required this.label, this.linked = false, this.tableNumber});
+  final String label;
+  final bool linked;
+  final String? tableNumber;
+
+  factory ComandaLookup.fromJson(Json j) => ComandaLookup(
+    label: asString(asMap(j['comanda_table'])['label'], asString(asMap(j['comanda_table'])['number'])),
+    linked: asBool(j['linked']),
+    tableNumber: asStringOrNull(asMap(j['link'])['table_number']),
+  );
+}

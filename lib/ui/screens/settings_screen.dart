@@ -87,8 +87,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(title.toUpperCase(), style: T.label.copyWith(color: C.zinc400)),
-          const SizedBox(height: 8),
+          SectionLabel(title, padding: const EdgeInsets.only(bottom: 8)),
           ...children,
         ],
       ),
@@ -103,7 +102,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final host = Uri.tryParse(s.serverUrl)?.host ?? '';
 
     return Scaffold(
-      backgroundColor: C.zinc50,
+      backgroundColor: C.bg,
       body: Column(
         children: [
           AppHeader(title: 'Configurações', subtitle: 'Deste aparelho', onBack: () => Navigator.pop(context)),
@@ -120,6 +119,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     for (final p in pending) _pendingTile(p),
                   ]),
+                _section('Mapa de mesas', [
+                  Text('Ordenar as mesas por', style: T.sm(w: T.medium)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      for (final (i, o) in const [
+                        ('number', 'Número'),
+                        ('title', 'Título'),
+                        ('status', 'Status'),
+                      ].indexed) ...[
+                        if (i > 0) const SizedBox(width: 8),
+                        Expanded(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(minHeight: 44),
+                            child: Choice(
+                              o.$2,
+                              selected: s.sortMode == o.$1,
+                              solid: true,
+                              onTap: () => s.setSortMode(o.$1),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ]),
                 _section('Impressão na maquininha', [
                   if (!t.canPrint)
                     const Padding(
@@ -163,7 +188,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 6),
                   Btn(
                     'Imprimir página de teste',
-                    kind: BtnKind.outline,
+                    kind: BtnKind.secondary,
                     icon: Icons.print_outlined,
                     loading: _printing,
                     onTap: t.canPrint ? _testPrint : null,
@@ -296,7 +321,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   width: 110,
                   child: Btn(
                     'Estornar',
-                    kind: BtnKind.outline,
+                    kind: BtnKind.secondary,
                     dense: true,
                     onTap: busy ? null : () => _tef(p, () => app.ledger.refund(p), 'Estorno concluído.'),
                   ),
@@ -306,7 +331,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   width: 110,
                   child: Btn(
                     '2ª via',
-                    kind: BtnKind.outline,
+                    kind: BtnKind.secondary,
                     dense: true,
                     onTap: busy ? null : () => _tef(p, () => app.terminal.reprint(p.atk!), '2ª via enviada.'),
                   ),

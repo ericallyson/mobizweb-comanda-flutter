@@ -1,20 +1,25 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../../app.dart';
 import '../../core/api.dart';
-import '../../core/uuid.dart';
 import '../../models/models.dart';
 import '../../stores/counter.dart';
+import '../../stores/order_draft.dart';
 import '../../stores/payments.dart';
-import '../catalog.dart';
 import '../kit.dart';
+import '../order_widgets.dart';
 import '../printing.dart';
-import '../sheets/session_sheets.dart';
-import 'product_screen.dart';
+import 'menu_screen.dart';
 
-/// Venda de balcão: carrinho + recebimento numa tacada só. Espelha
-/// `CounterView.vue`. 100% online; a chave de idempotência por carrinho
-/// impede venda duplicada quando a resposta se perde.
+/// Venda de balcão (5.7 do plano): o mesmo Cardápio da mesa, a tela "Venda de
+/// balcão" para conferir os itens e o recebimento numa tacada só. 100%
+/// online; a chave de idempotência por carrinho impede venda duplicada quando
+/// a resposta se perde.
+///
+/// É a tela que a aba "Balcão" abre. O recebimento ainda é a janela atual
+/// ([_CheckoutSheet]); a tela nova de "Receber venda" entra depois.
 class CounterScreen extends StatefulWidget {
   const CounterScreen({super.key});
 
@@ -22,75 +27,60 @@ class CounterScreen extends StatefulWidget {
   State<CounterScreen> createState() => _CounterScreenState();
 }
 
-class _CounterScreenState extends State<CounterScreen> {
-  final _cart = <CartItem>[];
+class _CounterScreenState extends State<CounterScreen> with StoreRebuild {
+  /// Itens da venda. A chave de idempotência da venda é a do carrinho.
+  final _cart = OrderCart();
 
   /// Parcelas já lançadas no recebimento (as de cartão já foram cobradas).
   final _parts = <CounterPayment>[];
-  String _cartKey = uuidV7();
   CounterSaleResult? _lastSale;
-  String? _error;
+
+  static const _chargedLock = 'Há pagamento já cobrado nesta venda: conclua o recebimento antes de mudar os itens.';
 
   @override
   void initState() {
     super.initState();
-    app.counter.addListener(_changed);
+    app.counter.addListener(rebuild);
+    _cart.addListener(rebuild);
     app.counter.fetchContext();
   }
 
   @override
   void dispose() {
-    app.counter.removeListener(_changed);
+    app.counter.removeListener(rebuild);
+    _cart.removeListener(rebuild);
+    _cart.dispose();
     super.dispose();
   }
 
-  void _changed() {
-    if (mounted) setState(() {});
-  }
-
-  double get _total => round2(_cart.fold(0, (a, i) => a + i.total));
-  int get _count => _cart.fold(0, (a, i) => a + (i.product.allowFractionalQty ? 1 : i.quantity.round()));
+  double get _total => round2(_cart.total);
   bool get _hasCharged => _parts.any((p) => p.charged);
 
-  Future<void> _selectProduct(MenuProduct product) async {
-    if (_hasCharged) {
-      toast(context, 'Há pagamento já cobrado nesta venda: conclua o recebimento antes de mudar os itens.', error: true);
-      return;
-    }
-    FocusScope.of(context).unfocus();
-    final item = await Navigator.push<CartItem>(
-      context,
-      MaterialPageRoute(builder: (_) => ProductScreen(product: product), fullscreenDialog: true),
-    );
-    if (item != null && mounted) setState(() => _cart.add(item));
-  }
+  /// Com pagamento já cobrado na maquininha os itens não mudam mais.
+  void _syncLock() => _cart.lockReason = _hasCharged ? _chargedLock : null;
 
-  Future<void> _openCart() async {
+  /// "Ver venda": a tela de conferência. Com pagamento já cobrado, vai direto
+  /// concluir o recebimento.
+  Future<void> _openSale() async {
     if (_hasCharged) {
       await _checkout();
       return;
     }
-    final go = await showSheet<bool>(
+    FocusScope.of(context).unfocus();
+    await Navigator.push<void>(
       context,
-      (_) => CartSheet(
-        title: 'Venda de balcão',
-        cart: _cart,
-        onChanged: _changed,
-        unavailableText: 'O cardápio mudou: há item indisponível na venda. Remova antes de receber.',
-        actionLabel: (total) => 'Receber (${brl(total)})',
-        // A folha só valida e fecha; o recebimento abre em seguida.
-        onAction: (_) async => _cart.any((i) => app.menu.isUnavailable(i.product.id))
-            ? 'Há item indisponível na venda. Remova antes de receber.'
-            : null,
-      ),
+      MaterialPageRoute(builder: (_) => CounterSaleScreen(cart: _cart, onReceive: _checkout)),
     );
-    _changed();
-    if (go == true && mounted && _cart.isNotEmpty) await _checkout();
   }
 
-  Future<void> _checkout() async {
-    setState(() => _error = null);
-    final items = List<CartItem>.of(_cart);
+  /// Abre o recebimento. Devolve `true` quando a venda foi registrada.
+  Future<bool> _checkout() async {
+    if (_cart.isEmpty) return false;
+    if (_cart.items.any((i) => app.menu.isUnavailable(i.product.id))) {
+      toast(context, 'Há item indisponível na venda. Remova antes de receber.', error: true);
+      return false;
+    }
+    final items = _cart.items;
     final result = await showSheet<_CheckoutDone>(
       context,
       (_) => _CheckoutSheet(
@@ -98,32 +88,34 @@ class _CounterScreenState extends State<CounterScreen> {
         methods: app.counter.context?.methods ?? const [],
         parts: _parts,
         items: items,
-        cartKey: _cartKey,
+        cartKey: _cart.key,
       ),
       dismissible: false,
     );
-    if (!mounted) return;
+    if (!mounted) return false;
+    _syncLock();
     setState(() {});
-    if (result == null) return;
+    if (result == null) return false;
 
     // Venda gravada: as transações da maquininha deixam de estar pendentes.
     await app.ledger.settle(result.payments.map((p) => p.atk).whereType<String>());
-    if (!mounted) return;
-    setState(() {
-      _lastSale = result.sale;
-      _cart.clear();
-      _parts.clear();
-      _cartKey = uuidV7();
-    });
+    if (!mounted) return true;
+    _parts.clear();
+    _cart.commit();
+    setState(() => _lastSale = result.sale);
     if (app.settings.printCounter && app.terminal.canPrint) {
-      await printCounterSale(
-        context,
-        sale: result.sale,
-        items: items,
-        payments: [for (final p in result.payments) (label: p.label, amount: p.amount)],
-        customerName: result.customerName,
+      // Sem `await`: a tela "Venda de balcão" fecha enquanto o comprovante imprime.
+      unawaited(
+        printCounterSale(
+          context,
+          sale: result.sale,
+          items: items,
+          payments: [for (final p in result.payments) (label: p.label, amount: p.amount)],
+          customerName: result.customerName,
+        ),
       );
     }
+    return true;
   }
 
   Future<void> _back() async {
@@ -131,13 +123,14 @@ class _CounterScreenState extends State<CounterScreen> {
       Navigator.pop(context);
       return;
     }
+    final n = _cart.count;
     final ok = await confirm(
       context,
       title: 'Abandonar a venda?',
       message: _hasCharged
           ? 'ATENÇÃO: há pagamento já cobrado na maquininha nesta venda. Ao abandonar, estorne-o em '
                 'Configurações › Pagamentos pendentes.'
-          : 'A venda atual será abandonada e os $_count item(ns) do carrinho serão descartados.',
+          : 'A venda atual será abandonada e ${n == 1 ? 'o item do carrinho será descartado' : 'os $n itens do carrinho serão descartados'}.',
       confirmLabel: 'Abandonar',
       cancelLabel: 'Continuar venda',
       danger: true,
@@ -150,8 +143,9 @@ class _CounterScreenState extends State<CounterScreen> {
     final counter = app.counter;
     final ctx = counter.context;
     final sale = _lastSale;
+    final store = app.auth.store?.name ?? '';
 
-    Widget body;
+    final Widget body;
     if (counter.loading && ctx == null) {
       body = const StateView(text: 'Carregando...');
     } else if (ctx == null) {
@@ -170,66 +164,18 @@ class _CounterScreenState extends State<CounterScreen> {
     } else if (!ctx.canSell) {
       body = const StateView(icon: Icons.lock_outline, text: 'Seu usuário não tem permissão para vender no balcão.');
     } else if (sale != null) {
-      body = Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.check_circle, size: 56, color: C.emerald500),
-              const SizedBox(height: 12),
-              Text('Venda #${sale.number ?? '—'} concluída', style: T.base(w: T.bold)),
-              const SizedBox(height: 4),
-              bigMoney(sale.total, size: 24),
-              if (sale.changeAmount > 0.005)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text('Troco: ${brl(sale.changeAmount)}', style: T.sm(w: T.semibold, c: C.amber700)),
-                ),
-              if (sale.requiresOperatorDecision)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Note('NFC-e rejeitada — resolva a emissão pelo PDV web. ${sale.blockReason ?? ''}', kind: NoteKind.error),
-                ),
-              const SizedBox(height: 20),
-              SizedBox(width: 220, child: Btn('Nova venda', kind: BtnKind.accent, onTap: () => setState(() => _lastSale = null))),
-            ],
-          ),
-        ),
-      );
+      body = _saleDone(sale);
     } else {
-      body = Column(
-        children: [
-          Expanded(child: CatalogBrowser(channel: 'pos', onSelect: _selectProduct)),
-          if (_error != null) Note(_error!, kind: NoteKind.error, radius: 0),
-          if (_cart.isNotEmpty)
-            Tap(
-              onTap: _openCart,
-              color: C.secondary500,
-              radius: 0,
-              splash: Colors.white24,
-              padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + MediaQuery.paddingOf(context).bottom),
-              child: Row(
-                children: [
-                  Container(
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(999)),
-                    child: Text('$_count', style: T.sm(w: T.bold, c: C.white)),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      _hasCharged ? 'Concluir recebimento (${brl(_total)})' : 'Ver venda (${brl(_total)})',
-                      style: T.sm(w: T.semibold, c: C.white),
-                    ),
-                  ),
-                  const Icon(Icons.chevron_right, color: C.white),
-                ],
-              ),
-            ),
-        ],
+      // Vendendo: o mesmo cardápio da mesa, no canal do balcão.
+      return MenuScreen(
+        cart: _cart,
+        title: 'Balcão',
+        subtitle: ['Venda de balcão', if (store.isNotEmpty) store].join(' · '),
+        channel: 'pos',
+        actions: [if (ctx.cashOpen) const Pill('Caixa aberto', bg: C.greenSoft, fg: C.greenText, size: 11)],
+        primaryLabel: _hasCharged ? 'Concluir recebimento' : 'Ver venda',
+        onPrimary: _openSale,
+        onCancel: _back,
       );
     }
 
@@ -239,19 +185,177 @@ class _CounterScreenState extends State<CounterScreen> {
         if (!didPop) _back();
       },
       child: Scaffold(
-        backgroundColor: C.zinc50,
+        backgroundColor: C.bg,
         body: Column(
           children: [
-            AppHeader(
-              title: 'Balcão',
-              subtitle: app.auth.store?.name,
-              onBack: _back,
-              actions: [
-                if (ctx?.cashOpen ?? false) const Pill('Caixa aberto', bg: C.emerald100, fg: C.emerald700, size: 11),
-              ],
-            ),
+            AppHeader(title: 'Balcão', subtitle: store.isEmpty ? null : store, onBack: _back),
             Expanded(child: body),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _saleDone(CounterSaleResult sale) => Center(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(color: C.greenSoft, shape: BoxShape.circle),
+            child: const Icon(Icons.check_rounded, size: 34, color: C.green),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            sale.number == null ? 'Venda concluída' : 'Venda #${sale.number} concluída',
+            textAlign: TextAlign.center,
+            style: T.s(21, w: T.bold, c: C.ink, h: 1.25),
+          ),
+          const SizedBox(height: 4),
+          Text(brl(sale.total), style: T.num(24)),
+          if (sale.changeAmount > 0.005)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('Troco: ${brl(sale.changeAmount)}', style: T.num(14, w: T.semibold, c: C.orangeText)),
+            ),
+          if (sale.requiresOperatorDecision)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Note(
+                'NFC-e rejeitada. Resolva a emissão pelo PDV web. ${sale.blockReason ?? ''}'.trim(),
+                kind: NoteKind.error,
+              ),
+            ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: 240,
+            child: Btn('Nova venda de balcão', kind: BtnKind.magenta, onTap: () => setState(() => _lastSale = null)),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// "Venda de balcão": a lista dos itens com −/+ e o total, "+ Itens" (volta
+/// ao cardápio) e "Receber".
+class CounterSaleScreen extends StatefulWidget {
+  const CounterSaleScreen({super.key, required this.cart, required this.onReceive});
+  final OrderCart cart;
+
+  /// Abre o recebimento. Devolve `true` quando a venda foi registrada (a tela
+  /// fecha e o balcão mostra "Venda concluída").
+  final Future<bool> Function() onReceive;
+
+  @override
+  State<CounterSaleScreen> createState() => _CounterSaleScreenState();
+}
+
+class _CounterSaleScreenState extends State<CounterSaleScreen> with StoreRebuild {
+  bool _receiving = false;
+
+  OrderCart get cart => widget.cart;
+
+  @override
+  void initState() {
+    super.initState();
+    cart.addListener(rebuild);
+    app.menu.addListener(rebuild);
+    app.api.online.addListener(rebuild);
+  }
+
+  @override
+  void dispose() {
+    cart.removeListener(rebuild);
+    app.menu.removeListener(rebuild);
+    app.api.online.removeListener(rebuild);
+    super.dispose();
+  }
+
+  Future<void> _receive() async {
+    if (_receiving) return;
+    setState(() => _receiving = true);
+    final sold = await widget.onReceive();
+    if (!mounted) return;
+    setState(() => _receiving = false);
+    if (sold) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final waiter = app.auth.user?.name.trim() ?? '';
+    final store = app.auth.store?.name ?? '';
+    final unavailable = cart.items.any((i) => app.menu.isUnavailable(i.product.id));
+    return Scaffold(
+      backgroundColor: C.bg,
+      body: Column(
+        children: [
+          AppHeader(
+            title: 'Venda de balcão',
+            subtitle: [if (store.isNotEmpty) store, if (waiter.isNotEmpty) waiter].join(' · '),
+            onBack: () => Navigator.pop(context),
+          ),
+          if (!app.api.online.value) const Note('Sem conexão com o servidor.', radius: 0),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(14),
+              children: [
+                if (cart.locked) ...[Note(cart.lockReason!), const SizedBox(height: 12)],
+                if (unavailable) ...[
+                  const Note('O cardápio mudou: há item indisponível na venda. Remova antes de receber.'),
+                  const SizedBox(height: 12),
+                ],
+                SectionLabel('Itens da venda', trailing: Tag(itemsCountLabel(cart.count))),
+                CardBox(
+                  padding: 0,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                    child: cart.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: Text('Nenhum item na venda.', style: T.body(c: C.sub)),
+                          )
+                        : Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (final (i, item) in cart.items.indexed)
+                                CartLine(
+                                  key: ValueKey(item.localId),
+                                  item: item,
+                                  cart: cart,
+                                  last: i == cart.items.length - 1,
+                                ),
+                            ],
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                CardBox(
+                  padding: 0,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                    child: Row(
+                      children: [
+                        Expanded(child: Text('Total', style: T.s(16, w: T.bold, c: C.ink, h: 1.3))),
+                        Text(brl(round2(cart.total)), style: T.num(16)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      bottomNavigationBar: BottomBar.duo(
+        Btn('+ Itens', kind: BtnKind.green, onTap: () => Navigator.pop(context)),
+        CountBtn(
+          label: cart.locked ? 'Concluir recebimento' : 'Receber',
+          total: round2(cart.total),
+          onTap: cart.isEmpty || _receiving ? null : _receive,
         ),
       ),
     );
@@ -406,7 +510,7 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
         _busy = false;
         _status = null;
         _error = e.isTransient
-            ? 'Sem resposta do servidor — verifique a conexão e toque em Receber de novo (não duplica a venda).'
+            ? 'Sem resposta do servidor. Verifique a conexão e toque em Receber de novo (não duplica a venda).'
             : e.message;
       });
     }

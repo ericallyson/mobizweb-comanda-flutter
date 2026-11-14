@@ -4,20 +4,22 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../app.dart';
 import '../../core/api.dart';
-import '../../core/uuid.dart';
 import '../../models/models.dart';
 import '../../print/receipt.dart';
-import '../catalog.dart';
+import '../../stores/order_draft.dart';
 import '../kit.dart';
 import '../printing.dart';
 import '../sheets/comandas_sheet.dart';
 import '../sheets/items_sheet.dart';
 import '../sheets/receive_sheet.dart';
 import '../sheets/session_sheets.dart';
-import 'product_screen.dart';
+import 'menu_screen.dart';
 
-/// A mesa aberta: cardápio para lançar, carrinho, itens, conta e recebimento.
-/// Espelha `TableSessionView.vue` do PWA.
+/// A mesa aberta: itens, conta e recebimento. Lançar itens abre o Cardápio
+/// novo ([openTableMenu]) pelo botão "+ Itens".
+///
+/// PROVISÓRIA: o desenho desta tela ainda é o antigo (a seção 5.5 do plano
+/// vai refazê-la). O que ela já faz do jeito novo é só a ida ao cardápio.
 class SessionScreen extends StatefulWidget {
   const SessionScreen({super.key, required this.sessionId, this.title});
   final String sessionId;
@@ -28,12 +30,9 @@ class SessionScreen extends StatefulWidget {
 }
 
 class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserver {
-  final _cart = <CartItem>[];
-
-  /// Chave de idempotência ESTÁVEL do carrinho atual: reenviar depois de um
-  /// timeout não duplica o pedido. Troca quando o envio é confirmado.
-  String _cartKey = uuidV7();
-  String? _lastComandaId;
+  /// Pedido em montagem desta mesa: o Cardápio e a Revisão trabalham nele.
+  /// Fica aqui para o carrinho sobreviver à ida e volta pelo botão "Conta".
+  late final TableOrderDraft _draft = sessionDraft(sessionId: widget.sessionId, title: widget.title ?? 'Mesa');
   String? _notice;
   bool _busy = false;
   Timer? _poll;
@@ -43,6 +42,7 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     app.session.addListener(_changed);
+    _draft.addListener(_changed);
     app.session.fetch(widget.sessionId);
     _poll = Timer.periodic(const Duration(seconds: 30), (_) {
       if (ModalRoute.of(context)?.isCurrent ?? false) app.session.fetch(widget.sessionId, silent: true);
@@ -61,6 +61,8 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     app.session.removeListener(_changed);
+    _draft.removeListener(_changed);
+    _draft.dispose();
     _poll?.cancel();
     super.dispose();
   }
@@ -71,76 +73,21 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
 
   SessionDetail? get _s => app.session.session?.id == widget.sessionId ? app.session.session : null;
 
-  double get _cartTotal => _cart.fold(0, (a, i) => a + i.total);
-  int get _cartCount => _cart.fold(0, (a, i) => a + (i.product.allowFractionalQty ? 1 : i.quantity.round()));
-
   void _leave() => Navigator.pop(context);
 
   // ── Pedido ────────────────────────────────────────────────────────────────
 
-  Future<void> _selectProduct(MenuProduct product) async {
-    FocusScope.of(context).unfocus();
-    final item = await Navigator.push<CartItem>(
-      context,
-      MaterialPageRoute(builder: (_) => ProductScreen(product: product), fullscreenDialog: true),
-    );
-    if (item != null && mounted) setState(() => _cart.add(item));
-  }
-
-  Future<void> _openCart() async {
-    final s = _s;
-    if (s == null) return;
-    await showSheet<bool>(
-      context,
-      (_) => CartSheet(
-        title: 'Pedido atual (não enviado)',
-        cart: _cart,
-        onChanged: _changed,
-        comandas: s.openComandas,
-        requireComanda: s.hasComandas,
-        initialComandaId: _lastComandaId,
-        actionLabel: (total) => 'Enviar para a cozinha (${brl(total)})',
-        onAction: _send,
-      ),
-    );
-    _changed();
-  }
-
-  /// Envia o carrinho. Devolve a mensagem de erro ou `null`.
-  Future<String?> _send(String? comandaId) async {
-    final s = _s;
-    if (s == null) return 'Mesa não carregada.';
-    if (_cart.any((i) => app.menu.isUnavailable(i.product.id))) {
-      return 'Há item indisponível no pedido. Remova antes de enviar.';
+  /// "+ Itens": Cardápio → Revisar pedido → enviar. O envio em si acontece na
+  /// revisão (`TableOrderDraft.submit` → `SessionStore.sendCart`).
+  Future<void> _addItems() async {
+    final result = await openTableMenu(context, _draft);
+    if (!mounted) return;
+    if (result.exit == OrderFlowExit.tables) {
+      _leave();
+      return;
     }
-    final sent = List<CartItem>.of(_cart);
-    final result = await app.session.sendCart(widget.sessionId, sent, comandaId: comandaId, idempotencyKey: _cartKey);
-    if (!result.ok) return result.error;
-
-    _lastComandaId = comandaId;
-    _cart.clear();
-    _cartKey = uuidV7();
-    _notice = result.kitchenSent
-        ? null
-        : 'Pedido gravado, mas NÃO saiu na produção. Avise a cozinha — não lance de novo.';
-    app.tables.fetch();
-    if (mounted) {
-      toast(context, 'Pedido enviado.');
-      if (app.settings.printOrders && app.terminal.canPrint) {
-        final comandaLabel = comandaId == null ? null : s.comandas.where((c) => c.id == comandaId).firstOrNull?.label;
-        // Sem `await`: a folha do carrinho fecha enquanto a via imprime.
-        unawaited(
-          printOrderTicket(
-            context,
-            tableLabel: s.title,
-            comandaLabel: comandaLabel,
-            customerName: s.customerName,
-            items: sent,
-          ),
-        );
-      }
-    }
-    return null;
+    if (result.sent) setState(() => _notice = result.notice);
+    app.session.fetch(widget.sessionId, silent: true);
   }
 
   // ── Conta ─────────────────────────────────────────────────────────────────
@@ -165,11 +112,11 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
       toast(context, 'Adicione itens antes de pedir a conta.', error: true);
       return;
     }
-    if (_cart.isNotEmpty) {
+    if (_draft.cart.isNotEmpty) {
       final ok = await confirm(
         context,
         title: 'Há um pedido não enviado',
-        message: 'Os ${_cart.length} item(ns) do carrinho ainda não foram lançados e não entram na conta.',
+        message: 'Os itens do carrinho (${_draft.cart.count}) ainda não foram lançados e não entram na conta.',
         confirmLabel: 'Pedir conta assim mesmo',
       );
       if (!ok || !mounted) return;
@@ -339,7 +286,7 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
           const SizedBox(height: 14),
           Field(
             controller: controller,
-            hint: 'Ex: João — aparece na mesa e nas impressões',
+            hint: 'Ex.: João. Aparece na mesa e nas impressões',
             maxLength: 120,
             autofocus: true,
             onSubmitted: (v) => Navigator.pop(ctx, v),
@@ -357,11 +304,11 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
   }
 
   Future<bool> _confirmLeave() async {
-    if (_cart.isEmpty) return true;
+    if (_draft.cart.isEmpty) return true;
     return confirm(
       context,
       title: 'Descartar o pedido?',
-      message: 'Os ${_cart.length} item(ns) do carrinho ainda não foram enviados para a cozinha.',
+      message: 'Os itens do carrinho (${_draft.cart.count}) ainda não foram enviados para a cozinha.',
       confirmLabel: 'Descartar',
       cancelLabel: 'Continuar',
       danger: true,
@@ -397,11 +344,11 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
     }
 
     return PopScope(
-      canPop: _cart.isEmpty,
+      canPop: _draft.cart.isEmpty,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
         if (await _confirmLeave() && mounted) {
-          _cart.clear();
+          _draft.discard();
           _leave();
         }
       },
@@ -468,7 +415,14 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text('Ver itens', style: T.xs(w: T.semibold, c: C.zinc700)),
+                      Flexible(
+                        child: Text(
+                          'Ver itens',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: T.xs(w: T.semibold, c: C.zinc700),
+                        ),
+                      ),
                       if (active.isNotEmpty) ...[
                         const SizedBox(width: 4),
                         Container(
@@ -516,7 +470,7 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
                       text: unassigned == 1 ? '1 item sem comanda' : '$unassigned itens sem comanda',
                       style: T.xs(w: T.bold, c: C.red800),
                       children: [
-                        TextSpan(text: ' — atribua a uma comanda antes de fechar a mesa.', style: T.xs(c: C.red800)),
+                        TextSpan(text: '. Atribua a uma comanda antes de fechar a mesa.', style: T.xs(c: C.red800)),
                       ],
                     ),
                   ),
@@ -534,38 +488,39 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
             ),
           ),
         if (_notice != null) Note(_notice!, radius: 0, onTap: () => setState(() => _notice = null)),
-        Expanded(
-          child: s.isOpen
-              ? (p.createOrder
-                    ? CatalogBrowser(onSelect: _selectProduct)
-                    : const StateView(text: 'Seu usuário não tem permissão para lançar pedidos.'))
-              : _closingView(s),
-        ),
-        if (s.isOpen && _cart.isNotEmpty)
-          Tap(
-            onTap: _openCart,
-            color: C.secondary500,
-            radius: 0,
-            splash: Colors.white24,
-            padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + MediaQuery.paddingOf(context).bottom),
-            child: Row(
-              children: [
-                Container(
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(999)),
-                  child: Text('$_cartCount', style: T.sm(w: T.bold, c: C.white)),
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Text('Ver pedido (${brl(_cartTotal)})', style: T.sm(w: T.semibold, c: C.white))),
-                const Icon(Icons.chevron_right, color: C.white),
-              ],
-            ),
+        Expanded(child: s.isOpen ? _openView(s) : _closingView(s)),
+        if (s.isOpen && p.createOrder)
+          BottomBar(
+            children: [
+              Btn(
+                _draft.cart.isEmpty
+                    ? '+ Itens'
+                    : '+ Itens · ${_draft.cart.count == 1 ? '1 não enviado' : '${_draft.cart.count} não enviados'}',
+                kind: BtnKind.green,
+                onTap: _addItems,
+              ),
+            ],
           ),
       ],
     );
   }
+
+  /// Corpo provisório da mesa aberta: o resumo da conta. O cardápio saiu
+  /// daqui; lançar itens é pelo botão "+ Itens" do rodapé.
+  Widget _openView(SessionDetail s) => ListView(
+    padding: const EdgeInsets.all(14),
+    children: [
+      CardBox(child: BillSummary(bill: s.bill)),
+      const SizedBox(height: 12),
+      Text(
+        app.auth.permissions.createOrder
+            ? 'Toque em "+ Itens" para lançar pedidos nesta mesa.'
+            : 'Seu usuário não tem permissão para lançar pedidos.',
+        textAlign: TextAlign.center,
+        style: T.body(c: C.sub),
+      ),
+    ],
+  );
 
   Widget _closingView(SessionDetail s) {
     final p = app.auth.permissions;
@@ -586,7 +541,7 @@ class _SessionScreenState extends State<SessionScreen> with WidgetsBindingObserv
               ),
               const SizedBox(height: 10),
               Text(
-                settled ? 'Conta quitada — aguardando fechamento da mesa.' : 'Conta solicitada — aguardando pagamento.',
+                settled ? 'Conta quitada. Aguardando fechamento da mesa.' : 'Conta solicitada. Aguardando pagamento.',
                 textAlign: TextAlign.center,
                 style: T.sm(w: T.medium, c: C.zinc600),
               ),

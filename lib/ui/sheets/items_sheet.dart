@@ -5,15 +5,8 @@ import '../../app.dart';
 import '../../models/models.dart';
 import '../../stores/session.dart';
 import '../kit.dart';
+import '../order_widgets.dart';
 import 'session_sheets.dart';
-
-const _statusLabel = {
-  'pending': 'Aguardando',
-  'preparing': 'Preparando',
-  'ready': 'Pronto',
-  'delivered': 'Entregue',
-  'canceled': 'Cancelado',
-};
 
 const _statusColors = <String, (Color, Color)>{
   'pending': (C.amber100, C.amber700),
@@ -233,7 +226,7 @@ class _SessionItemsScreenState extends State<SessionItemsScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              Pill(_statusLabel[item.status] ?? item.status, bg: bg, fg: fg, size: 11, bold: false),
+              Pill(itemStatusLabel(item.status), bg: bg, fg: fg, size: 11, bold: false),
             ],
           ),
           if (canTransfer || canCancel)

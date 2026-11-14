@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:material_ui/material_ui.dart';
 
 import '../../app.dart';
@@ -8,13 +6,18 @@ import '../../models/models.dart';
 import '../../stores/tables.dart';
 import '../kit.dart';
 import '../sheets/open_table_sheet.dart';
+import '../sheets/store_switch_sheet.dart';
+import '../table_card.dart';
 import '../table_status.dart';
-import 'cash_screen.dart';
-import 'counter_screen.dart';
+import 'menu_screen.dart';
+import 'notifications_screen.dart';
 import 'session_screen.dart';
 import 'settings_screen.dart';
 
-/// Mapa de mesas — a tela inicial, como `TablesListView.vue` do PWA.
+/// Mapa de mesas (seção 5.1 do layout novo): topo navy com a loja, o garçom,
+/// o sino e a busca com "Entrar"; chips de filtro com contagem; grade de 4
+/// colunas. É uma ABA da [HomeShell]: não tem `Scaffold` próprio e quem
+/// atualiza os dados de tempos em tempos é a casca.
 class TablesScreen extends StatefulWidget {
   const TablesScreen({super.key});
 
@@ -22,68 +25,21 @@ class TablesScreen extends StatefulWidget {
   State<TablesScreen> createState() => _TablesScreenState();
 }
 
-class _TablesScreenState extends State<TablesScreen> with WidgetsBindingObserver {
+class _TablesScreenState extends State<TablesScreen> {
   final _search = TextEditingController();
-  String _filter = 'all';
+  TableFilter _filter = TableFilter.all;
   bool _showComandas = false;
-  bool _showSettings = false;
-  bool _showStores = false;
-  bool _switching = false;
   bool _opening = false;
-  Timer? _poll;
-  Timer? _tick;
-
-  static const _filters = <(String, String)>[
-    ('all', 'Todas'),
-    ('available', 'Livres'),
-    ('occupied', 'Ocupadas'),
-    ('reserved', 'Reservas'),
-    ('closing', 'Fechando'),
-    ('pending', 'Pendentes'),
-  ];
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     app.tables.addListener(_changed);
     app.settings.addListener(_changed);
     app.ledger.addListener(_changed);
-    app.api.online.addListener(_onConnectivity);
-    app.auth.refreshPermissions().then((_) => _changed());
-    app.tables.fetch();
-    app.methods.load();
-    _startTimers();
-  }
-
-  void _startTimers() {
-    _poll?.cancel();
-    _tick?.cancel();
-    // Sem WebSocket (a Stone proíbe no app embarcado): o mapa se atualiza por
-    // polling, na mesma cadência do fallback do PWA.
-    _poll = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (ModalRoute.of(context)?.isCurrent ?? true) app.tables.fetch();
-    });
-    // Relógio do rótulo "Ociosa · N min".
-    _tick = Timer.periodic(const Duration(seconds: 30), (_) => _changed());
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      app.tables.fetch();
-      app.menu.revalidate();
-      _startTimers();
-    } else if (state == AppLifecycleState.paused) {
-      _poll?.cancel();
-      _tick?.cancel();
-    }
-  }
-
-  void _onConnectivity() {
-    // Voltou a rede: registra o que a maquininha cobrou e ficou pendente.
-    if (app.api.online.value) app.ledger.retryAll();
-    _changed();
+    app.notifications.addListener(_changed);
+    app.auth.addListener(_changed);
+    app.api.online.addListener(_changed);
   }
 
   void _changed() {
@@ -92,13 +48,12 @@ class _TablesScreenState extends State<TablesScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     app.tables.removeListener(_changed);
     app.settings.removeListener(_changed);
     app.ledger.removeListener(_changed);
-    app.api.online.removeListener(_onConnectivity);
-    _poll?.cancel();
-    _tick?.cancel();
+    app.notifications.removeListener(_changed);
+    app.auth.removeListener(_changed);
+    app.api.online.removeListener(_changed);
     _search.dispose();
     super.dispose();
   }
@@ -107,27 +62,18 @@ class _TablesScreenState extends State<TablesScreen> with WidgetsBindingObserver
 
   bool get _hasComandaTables => app.tables.tables.any((t) => t.isComanda);
 
-  List<DiningTable> get _kindTables => _hasComandaTables
-      ? app.tables.tables.where((t) => t.isComanda == _showComandas).toList()
-      : app.tables.tables;
+  /// Mesas da aba aberta (Mesas ou Comandas), antes de filtro e busca.
+  List<DiningTable> get _kindTables =>
+      _hasComandaTables ? app.tables.tables.where((t) => t.isComanda == _showComandas).toList() : app.tables.tables;
 
   static const _statusOrder = {'occupied': 0, 'closing': 1, 'reserved': 2, 'available': 3};
 
-  static String _numberKey(DiningTable t) => t.number.replaceFirst(RegExp(r'^mesa\s*', caseSensitive: false), '');
-
-  List<DiningTable> get _filtered {
-    var list = _kindTables;
-    if (_filter == 'pending') {
-      list = list.where((t) => t.pendingCalls > 0).toList();
-    } else if (_filter != 'all') {
-      list = list.where((t) => t.status == _filter).toList();
-    }
-    final q = _search.text.trim().toLowerCase();
-    if (q.isNotEmpty) {
-      list = list.where((t) => t.title.toLowerCase().contains(q) || t.number.contains(q)).toList();
-    }
-    final sorted = [...list];
-    int byNumber(DiningTable a, DiningTable b) => naturalCompare(_numberKey(a), _numberKey(b));
+  List<DiningTable> _filtered(DateTime now) {
+    final limit = app.tables.idleAlertMinutes;
+    final sorted = _kindTables
+        .where((t) => tableMatchesFilter(t, _filter, limit, now) && tableMatchesQuery(t, _search.text))
+        .toList();
+    int byNumber(DiningTable a, DiningTable b) => naturalCompare(tableNumberKey(a), tableNumberKey(b));
     switch (app.settings.sortMode) {
       case 'title':
         sorted.sort((a, b) => naturalCompare(a.title, b.title));
@@ -145,88 +91,103 @@ class _TablesScreenState extends State<TablesScreen> with WidgetsBindingObserver
   // ── Ações ─────────────────────────────────────────────────────────────────
 
   Future<void> _push(Widget screen) async {
-    setState(() {
-      _showSettings = false;
-      _showStores = false;
-    });
+    FocusScope.of(context).unfocus();
     await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => screen));
     if (mounted) app.tables.fetch();
   }
 
+  /// Toque num card (ou "Entrar"): mesa livre começa um atendimento; mesa com
+  /// atendimento abre a tela da mesa.
   Future<void> _onTable(DiningTable table) async {
     if (_opening) return;
     if (table.status == 'available') {
-      if (!app.auth.permissions.openSession) {
-        toast(context, 'Seu usuário não tem permissão para abrir mesas.', error: true);
-        return;
-      }
-      final data = await showSheet<OpenTableData>(
-        context,
-        (_) => OpenTableSheet(
-          table: table,
-          enableComandas: app.tables.enableComandas && !(table.label?.startsWith('Comanda') ?? false) && !table.isComanda,
-        ),
-      );
-      if (data == null || !mounted) return;
-      setState(() => _opening = true);
-      try {
-        final sessionId = await app.tables.open(
-          table,
-          guestCount: data.guestCount,
-          customerName: data.customerName,
-          comandas: data.comandas,
-        );
-        if (!mounted) return;
-        app.session.clear();
-        app.tables.fetch();
-        await _push(SessionScreen(sessionId: sessionId, title: table.title));
-      } on ApiException catch (e) {
-        if (mounted) toast(context, e.isNetwork ? e.message : 'Não foi possível abrir a mesa. ${e.message}', error: true);
-      } finally {
-        if (mounted) setState(() => _opening = false);
-      }
+      await _startFreeTable(table);
     } else if (table.session != null) {
-      app.session.clear();
-      await _push(SessionScreen(sessionId: table.session!.id, title: table.title));
+      await _openSession(table.session!.id, table.title);
     }
   }
 
-  Future<void> _switchStore(StoreRef s) async {
-    if (_switching) return;
-    if (s.id == app.auth.store?.id) {
-      setState(() => _showStores = false);
+  Future<void> _openSession(String sessionId, String title) async {
+    app.session.clear();
+    await _push(SessionScreen(sessionId: sessionId, title: title));
+  }
+
+  /// TOQUE EM MESA LIVRE: vai direto ao Cardápio (seção 5.2 do plano). Nada
+  /// é criado no servidor aqui: a mesa só é aberta quando o garçom toca
+  /// "Enviar para cozinha" em "Revisar pedido", que é onde ficam os campos do
+  /// antigo formulário "Abrir mesa" (pessoas, cliente e comandas).
+  Future<void> _startFreeTable(DiningTable table) async {
+    final p = app.auth.permissions;
+    if (!p.openSession) {
+      toast(context, 'Seu usuário não tem permissão para abrir mesas.', error: true);
       return;
     }
-    setState(() => _switching = true);
-    final error = await app.auth.selectStore(s);
+    // Quem pode abrir mesa mas não pode lançar pedido continua abrindo a mesa
+    // vazia pelo formulário (o cardápio não serviria para nada).
+    if (!p.createOrder) return _openWithoutOrder(table);
+
+    FocusScope.of(context).unfocus();
+    app.session.clear();
+    final draft = freeTableDraft(table);
+    final result = await openTableMenu(context, draft);
+    draft.dispose();
     if (!mounted) return;
-    if (error == null) {
-      app.resetDomain();
-      app.tables.fetch();
-      app.menu.fetch();
-      app.methods.load(force: true);
-    } else {
-      toast(context, 'Não foi possível trocar de loja. Tente novamente.', error: true);
+    app.tables.fetch();
+    if (result.exit == OrderFlowExit.stay && result.sessionId != null) {
+      await _openSession(result.sessionId!, table.title);
     }
-    setState(() {
-      _switching = false;
-      _showStores = false;
-    });
   }
 
-  Future<void> _logout() async {
-    final pending = app.ledger.pending.length;
-    final ok = await confirm(
+  /// Abre a mesa sem pedido, pelo formulário "Abrir mesa" (só para quem não
+  /// tem permissão de lançar pedidos).
+  Future<void> _openWithoutOrder(DiningTable table) async {
+    final data = await showSheet<OpenTableData>(
       context,
-      title: 'Sair do app?',
-      message: pending > 0
-          ? 'Há $pending pagamento(s) da maquininha sem registro. Eles continuam guardados neste aparelho.'
-          : 'Você volta para a tela de login.',
-      confirmLabel: 'Sair',
-      cancelLabel: 'Cancelar',
-      danger: true,
+      (_) => OpenTableSheet(
+        table: table,
+        enableComandas: app.tables.enableComandas && !(table.label?.startsWith('Comanda') ?? false) && !table.isComanda,
+      ),
     );
-    if (ok) await app.auth.logout();
+    if (data == null || !mounted) return;
+    setState(() => _opening = true);
+    try {
+      final sessionId = await app.tables.open(
+        table,
+        guestCount: data.guestCount,
+        customerName: data.customerName,
+        comandas: data.comandas,
+      );
+      if (!mounted) return;
+      app.tables.fetch();
+      await _openSession(sessionId, table.title);
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.isNetwork ? e.message : 'Não foi possível abrir a mesa. ${e.message}', error: true);
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  /// Botão "Entrar": abre direto a mesa ou comanda digitada.
+  Future<void> _enter() async {
+    final typed = _search.text.trim();
+    if (typed.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    final table = findTableForEntry(app.tables.tables, typed, preferComanda: _showComandas);
+    if (table == null) {
+      final n = typed.replaceFirst(RegExp(r'^(mesa|comanda)\s*', caseSensitive: false), '');
+      toast(context, 'Mesa $n não existe neste salão');
+      return;
+    }
+    if (table.status != 'available' && table.session == null) {
+      toast(
+        context,
+        '${table.title} está ${tableStatusStyle(table.status).label.toLowerCase()} e não tem atendimento aberto',
+      );
+      return;
+    }
+    _search.clear();
+    setState(() {});
+    await _onTable(table);
   }
 
   // ── Tela ──────────────────────────────────────────────────────────────────
@@ -235,428 +196,245 @@ class _TablesScreenState extends State<TablesScreen> with WidgetsBindingObserver
   Widget build(BuildContext context) {
     final auth = app.auth;
     final store = app.tables;
-    final perms = auth.permissions;
-    final canCash = perms.cashOpen || perms.cashClose || perms.cashMovement;
-    final filtered = _filtered;
-    final pendingTables = _kindTables.where((t) => t.pendingCalls > 0).length;
+    final now = DateTime.now();
+    final filtered = _filtered(now);
+    final counts = countTablesByFilter(_kindTables, store.idleAlertMinutes, now);
     final offline = !app.api.online.value;
+    final pendingTef = app.ledger.pending.length;
+    final waiter = auth.user?.name.trim() ?? '';
 
-    return Scaffold(
-      backgroundColor: C.zinc50,
-      body: Column(
+    // Um filtro que deixou de existir (ex.: a última reserva saiu) volta a "Todas".
+    if ((_filter == TableFilter.reserved || _filter == TableFilter.pending) && (counts[_filter] ?? 0) == 0) {
+      _filter = TableFilter.all;
+    }
+
+    return ColoredBox(
+      color: C.bg,
+      child: Column(
         children: [
           AppHeader(
-            title: 'Mesas',
-            subtitleWidget: auth.store == null
-                ? null
-                : GestureDetector(
-                    onTap: auth.hasMultipleStores ? () => setState(() => _showStores = !_showStores) : null,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            auth.store!.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: T.xs(c: C.primary200),
-                          ),
-                        ),
-                        if (auth.hasMultipleStores) const Icon(Icons.arrow_drop_down, size: 16, color: C.primary200),
-                      ],
-                    ),
-                  ),
+            title: auth.store?.name ?? 'Mesas',
+            titleWidget: _storeTitle(),
+            subtitle: waiter.isEmpty ? null : 'Garçom $waiter',
             actions: [
-              if (perms.counterSale)
-                HeaderButton(icon: Icons.shopping_cart_outlined, tooltip: 'Balcão', onTap: () => _push(const CounterScreen())),
-              if (canCash)
-                HeaderButton(icon: Icons.account_balance_wallet_outlined, tooltip: 'Caixa', onTap: () => _push(const CashScreen())),
               HeaderButton(
-                icon: Icons.refresh,
-                tooltip: 'Atualizar',
-                spinning: store.loading,
-                onTap: store.loading ? null : store.fetch,
-              ),
-              HeaderButton(
-                icon: _showSettings ? Icons.close : Icons.settings_outlined,
-                tooltip: 'Configurações',
-                badge: app.ledger.pending.length,
-                onTap: () => setState(() => _showSettings = !_showSettings),
+                icon: Icons.notifications_none,
+                tooltip: 'Notificações',
+                badge: app.notifications.count,
+                onTap: () => openNotifications(context),
               ),
             ],
+            bottom: _quickEntry(),
           ),
-          if (_showStores) _storeSwitcher(),
           if (offline)
-            const Note('Sem conexão com o servidor — mostrando os últimos dados.', radius: 0),
-          if (app.ledger.pending.isNotEmpty)
             Note(
-              '${app.ledger.pending.length} pagamento(s) da maquininha sem registro — toque para resolver.',
+              store.lastFetchedAt == null
+                  ? 'Sem conexão com o servidor.'
+                  : 'Sem conexão com o servidor. Mostrando os dados das ${hhmmss(store.lastFetchedAt!)}.',
+              radius: 0,
+            ),
+          if (pendingTef > 0)
+            Note(
+              pendingTef == 1
+                  ? '1 pagamento da maquininha sem registro. Toque para resolver.'
+                  : '$pendingTef pagamentos da maquininha sem registro. Toque para resolver.',
               kind: NoteKind.error,
               radius: 0,
               onTap: () => _push(const SettingsScreen(openPending: true)),
             ),
-          // Busca
-          Container(
-            color: C.white,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: TextField(
-              controller: _search,
-              onChanged: (_) => setState(() {}),
-              textInputAction: TextInputAction.search,
-              style: T.sm(),
-              decoration: InputDecoration(
-                hintText: 'Buscar mesa...',
-                hintStyle: T.sm(c: C.zinc400),
-                isDense: true,
-                filled: true,
-                fillColor: C.zinc100,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-              ),
-            ),
-          ),
           if (_hasComandaTables) _kindTabs(),
-          _filterChips(pendingTables),
-          const Divider(height: 1, thickness: 1, color: C.zinc200),
-          if (_showSettings) _settingsPanel(),
-          Expanded(child: _body(filtered)),
-          if (store.lastFetchedAt != null)
-            Padding(
-              padding: EdgeInsets.only(top: 3, bottom: 3 + MediaQuery.paddingOf(context).bottom),
-              child: Text('Atualizado às ${hhmmss(store.lastFetchedAt!)}', style: T.xs(c: C.zinc300)),
-            ),
+          _filterChips(counts),
+          Expanded(child: _body(filtered, now)),
         ],
       ),
     );
   }
 
-  Widget _body(List<DiningTable> filtered) {
+  /// Nome da loja com "▾": toque abre a troca de loja (quando há mais de uma).
+  Widget? _storeTitle() {
+    final auth = app.auth;
+    if (auth.store == null) return null;
+    final name = Text(auth.store!.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.top);
+    if (!auth.hasMultipleStores) return name;
+    return Semantics(
+      button: true,
+      label: 'Trocar loja. Loja atual: ${auth.store!.name}',
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => showStoreSwitch(context),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(child: name),
+            const Icon(Icons.arrow_drop_down, size: 22, color: C.white),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Campo "Buscar mesa ou comanda" + botão "Entrar". Filtra enquanto digita.
+  Widget _quickEntry() => SizedBox(
+    height: 44,
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(color: C.white, borderRadius: BorderRadius.circular(12)),
+            alignment: Alignment.center,
+            child: TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _enter(),
+              textInputAction: TextInputAction.go,
+              autocorrect: false,
+              textAlignVertical: TextAlignVertical.center,
+              style: T.body(w: T.medium),
+              decoration: InputDecoration(
+                hintText: 'Buscar mesa ou comanda',
+                hintStyle: T.body(w: T.medium, c: C.sub),
+                isDense: true,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                suffixIcon: _search.text.isEmpty
+                    ? null
+                    : Semantics(
+                        button: true,
+                        label: 'Limpar busca',
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => setState(_search.clear),
+                          child: const Icon(Icons.close, size: 18, color: C.sub),
+                        ),
+                      ),
+                suffixIconConstraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Tap(
+          onTap: _enter,
+          color: C.magenta,
+          radius: 12,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Center(
+            child: Text(
+              'Entrar',
+              style: T.s(14, w: T.bold, c: C.white, h: 1.2),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _body(List<DiningTable> filtered, DateTime now) {
     final store = app.tables;
     if (store.loading && store.tables.isEmpty) return const StateView(text: 'Carregando mesas...');
     if (store.error != null && store.tables.isEmpty) {
       return StateView(text: store.error!, error: true, onAction: store.fetch);
     }
-    if (filtered.isEmpty) return const StateView(text: 'Nenhuma mesa encontrada.');
-
-    final cols = app.settings.gridCols;
-    final rows = (filtered.length / cols).ceil();
-    final now = DateTime.now();
-    return RefreshIndicator(
-      color: C.primary600,
-      onRefresh: store.fetch,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: rows,
-        itemBuilder: (context, r) {
-          final slice = filtered.sublist(r * cols, ((r + 1) * cols).clamp(0, filtered.length));
-          return Padding(
-            padding: EdgeInsets.only(bottom: r == rows - 1 ? 0 : 12),
-            child: IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (var c = 0; c < cols; c++) ...[
-                    if (c > 0) const SizedBox(width: 12),
-                    Expanded(
-                      child: c < slice.length
-                          ? TableCard(
-                              table: slice[c],
-                              cols: cols,
-                              idle: idleMinutes(slice[c], store.idleAlertMinutes, now),
-                              onTap: () => _onTable(slice[c]),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                  ],
-                ],
-              ),
+    if (filtered.isEmpty) {
+      return RefreshIndicator(
+        color: C.navy,
+        onRefresh: store.fetch,
+        child: LayoutBuilder(
+          builder: (context, box) => SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: SizedBox(
+              height: box.maxHeight,
+              child: const StateView(text: 'Nenhuma mesa encontrada.'),
             ),
-          );
-        },
-      ),
+          ),
+        ),
+      );
+    }
+    return RefreshIndicator(
+      color: C.navy,
+      onRefresh: store.fetch,
+      child: TableGrid(tables: filtered, idleLimitMinutes: store.idleAlertMinutes, now: now, onTap: _onTable),
     );
   }
 
-  Widget _storeSwitcher() => Container(
-    color: C.white,
-    child: Column(
-      children: [
-        for (final s in app.auth.stores)
-          Tap(
-            onTap: _switching ? null : () => _switchStore(s),
-            radius: 0,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    s.name,
-                    style: s.id == app.auth.store?.id ? T.sm(w: T.semibold, c: C.primary700) : T.sm(c: C.zinc700),
-                  ),
-                ),
-                if (s.id == app.auth.store?.id) const Icon(Icons.check, size: 16, color: C.primary600),
-              ],
-            ),
-          ),
-        const Divider(height: 1, thickness: 1, color: C.zinc200),
-      ],
-    ),
-  );
-
+  /// Abas Mesas | Comandas (só quando a loja tem comanda física).
   Widget _kindTabs() {
     final mesas = app.tables.tables.where((t) => !t.isComanda).length;
     final comandas = app.tables.tables.length - mesas;
     Widget tab(String label, int count, bool comandaTab) {
       final active = _showComandas == comandaTab;
       return Expanded(
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => setState(() {
-            _showComandas = comandaTab;
-            _filter = 'all';
-          }),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 9),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: active ? C.primary600 : Colors.transparent, width: 2)),
-            ),
-            child: Text.rich(
-              TextSpan(
-                text: label,
-                children: [TextSpan(text: ' ($count)', style: T.xs(c: active ? C.primary400 : C.zinc400))],
+        child: Semantics(
+          button: true,
+          selected: active,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() {
+              _showComandas = comandaTab;
+              _filter = TableFilter.all;
+            }),
+            // 4 px de respiro dentro da área de toque: 44 px de toque, 36 de aba.
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 36),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: active ? C.navy : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text('$label $count', style: T.num(12.5, c: active ? C.white : C.sub, h: 1.2)),
               ),
-              textAlign: TextAlign.center,
-              style: T.sm(w: T.semibold, c: active ? C.primary700 : C.zinc400),
             ),
           ),
         ),
       );
     }
 
-    return Container(
-      color: C.white,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(children: [tab('Mesas', mesas, false), const SizedBox(width: 8), tab('Comandas', comandas, true)]),
-    );
-  }
-
-  Widget _filterChips(int pendingTables) => Container(
-    color: C.white,
-    width: double.infinity,
-    child: SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          for (final (value, label) in _filters)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Builder(
-                builder: (_) {
-                  final active = _filter == value;
-                  final bg = !active
-                      ? C.zinc100
-                      : value == 'all'
-                      ? C.primary600
-                      : value == 'pending'
-                      ? C.amber500
-                      : tableStatusStyle(value).border;
-                  return Tap(
-                    onTap: () => setState(() => _filter = value),
-                    color: bg,
-                    radius: 999,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(label, style: T.xs(w: T.medium, c: active ? C.white : C.zinc600)),
-                        if (value == 'pending' && pendingTables > 0) ...[
-                          const SizedBox(width: 4),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            decoration: BoxDecoration(
-                              color: active ? C.white : C.amber600,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text('$pendingTables', style: T.s(10, w: T.bold, c: active ? C.amber700 : C.white)),
-                          ),
-                        ],
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-        ],
-      ),
-    ),
-  );
-
-  Widget _settingsPanel() {
-    final s = app.settings;
-    final user = app.auth.user;
-    Widget heading(String t) => Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(t.toUpperCase(), style: T.label.copyWith(color: C.zinc400)),
-    );
-    return Container(
-      color: C.zinc50,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          heading('Colunas da grade'),
-          Row(
-            children: [
-              for (final n in const [2, 3, 4]) ...[
-                if (n > 2) const SizedBox(width: 8),
-                Expanded(child: Choice('$n cols', selected: s.gridCols == n, solid: true, onTap: () => s.setGridCols(n))),
-              ],
-            ],
-          ),
-          const SizedBox(height: 12),
-          heading('Ordenar mesas por'),
-          Row(
-            children: [
-              for (final (i, o) in const [('number', 'Número'), ('title', 'Título'), ('status', 'Status')].indexed) ...[
-                if (i > 0) const SizedBox(width: 8),
-                Expanded(child: Choice(o.$2, selected: s.sortMode == o.$1, solid: true, onTap: () => s.setSortMode(o.$1))),
-              ],
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: Btn(
-              'Impressão, maquininha e suporte',
-              kind: BtnKind.outline,
-              icon: Icons.tune,
-              onTap: () => _push(const SettingsScreen()),
-            ),
-          ),
-          const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Divider(height: 1, color: C.zinc200)),
-          if (user != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    alignment: Alignment.center,
-                    decoration: const BoxDecoration(color: C.primary600, shape: BoxShape.circle),
-                    child: Text(
-                      user.name.trim().isEmpty ? '?' : user.name.trim()[0].toUpperCase(),
-                      style: T.sm(w: T.bold, c: C.white),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(user.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.sm(w: T.semibold)),
-                        Text(user.email, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.xs(c: C.zinc500)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          SizedBox(width: double.infinity, child: Btn('Sair', kind: BtnKind.dangerSoft, onTap: _logout)),
-        ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+      child: Container(
+        decoration: BoxDecoration(color: C.white, borderRadius: BorderRadius.circular(12)),
+        child: Row(children: [tab('Mesas', mesas, false), tab('Comandas', comandas, true)]),
       ),
     );
   }
-}
 
-/// Card de mesa: três sinais de status (borda, barra de acento e pílula com
-/// rótulo) e só o que EXISTE no atendimento — mesa livre não ganha texto.
-class TableCard extends StatelessWidget {
-  const TableCard({super.key, required this.table, required this.cols, required this.idle, this.onTap});
-  final DiningTable table;
-  final int cols;
-
-  /// Minutos ociosa, ou `null`.
-  final int? idle;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final st = idle != null ? tableIdleStyle : tableStatusStyle(table.status);
-    final label = idle != null ? formatIdleLabel(idle!) : st.label;
-    final titleSize = cols >= 4 ? 14.0 : (cols == 3 ? 16.0 : 18.0);
-    final pad = cols >= 4 ? 10.0 : (cols == 3 ? 12.0 : 16.0);
-    final s = table.session;
-
-    return Tap(
-      onTap: onTap,
-      color: st.bg,
-      radius: 16,
-      border: BorderSide(color: st.border, width: 1.5),
-      splash: Colors.white24,
-      padding: EdgeInsets.fromLTRB(pad, pad - 4, pad, pad),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Barra de acento: leitura do status pela visão periférica.
-          Container(
-            height: 5,
-            decoration: BoxDecoration(color: st.accent, borderRadius: BorderRadius.circular(3)),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  table.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: T.s(titleSize, w: T.bold, c: st.text, h: 1.25),
+  /// Faixa de chips: bolinha da cor do status, nome e contagem. "Reservas" e
+  /// "Pendentes" só aparecem quando existem.
+  Widget _filterChips(Map<TableFilter, int> counts) {
+    final chips = <(TableFilter, String, Color?)>[
+      (TableFilter.all, 'Todas', null),
+      (TableFilter.available, 'Livres', tableGroupStyle(TableFilter.available).bg),
+      (TableFilter.occupied, 'Ocupadas', tableGroupStyle(TableFilter.occupied).bg),
+      (TableFilter.closing, 'Fechando', tableGroupStyle(TableFilter.closing).bg),
+      (TableFilter.idle, 'Ociosas', tableGroupStyle(TableFilter.idle).bg),
+      if ((counts[TableFilter.reserved] ?? 0) > 0)
+        (TableFilter.reserved, 'Reservas', tableGroupStyle(TableFilter.reserved).bg),
+      if ((counts[TableFilter.pending] ?? 0) > 0) (TableFilter.pending, 'Pendentes', C.magenta),
+    ];
+    return SizedBox(
+      width: double.infinity,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+        child: Row(
+          children: [
+            for (final (i, (value, label, dot)) in chips.indexed)
+              Padding(
+                padding: EdgeInsets.only(left: i == 0 ? 0 : 6),
+                child: FilterPill(
+                  label: label,
+                  count: counts[value] ?? 0,
+                  dot: dot,
+                  selected: _filter == value,
+                  onTap: () => setState(() => _filter = value),
                 ),
               ),
-              if (table.pendingCalls > 0)
-                Container(
-                  margin: const EdgeInsets.only(left: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: C.amber500, borderRadius: BorderRadius.circular(999)),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.notifications_active, size: 13, color: C.white),
-                      if (table.pendingCalls > 1) Text(' ${table.pendingCalls}', style: T.s(11, w: T.bold, c: C.white)),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          if (table.areaName != null)
-            Text(table.areaName!, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.xs(c: st.textMuted)),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: 4,
-            runSpacing: 4,
-            children: [
-              Pill(label, bg: st.accent, fg: C.white, size: cols >= 4 ? 12 : 14),
-              if (table.hasUnassignedItems) const Pill('Sem comanda', bg: C.red600, fg: C.white, size: 11),
-            ],
-          ),
-          if (s != null) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Divider(height: 1, thickness: 1, color: st.text.withValues(alpha: 0.2)),
-            ),
-            if (s.customerName != null)
-              Text(s.customerName!, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.xs(w: T.semibold, c: st.text)),
-            if (s.openedByName != null)
-              Text(s.openedByName!, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.xs(c: st.textMuted)),
-            if (s.guestCount != null && s.guestCount! > 0)
-              Text('${s.guestCount} pessoa(s)', style: T.xs(c: st.textMuted)),
-            Text(brl(s.total), style: T.xs(w: T.semibold, c: st.text)),
           ],
-        ],
+        ),
       ),
     );
   }

@@ -6,8 +6,10 @@ import 'core/storage.dart';
 import 'stone/terminal.dart';
 import 'stores/auth.dart';
 import 'stores/cash.dart';
+import 'stores/comanda_link.dart';
 import 'stores/counter.dart';
 import 'stores/menu.dart';
+import 'stores/notifications.dart';
 import 'stores/payments.dart';
 import 'stores/session.dart';
 import 'stores/settings.dart';
@@ -30,6 +32,8 @@ class App {
     required this.counter,
     required this.methods,
     required this.ledger,
+    required this.notifications,
+    required this.comandaLink,
   });
 
   final Native native;
@@ -45,6 +49,8 @@ class App {
   final CounterStore counter;
   final PaymentMethodsStore methods;
   final TefLedger ledger;
+  final NotificationsStore notifications;
+  final ComandaLinkStore comandaLink;
 
   static App? _instance;
   static App get instance => _instance!;
@@ -77,6 +83,8 @@ class App {
       counter: CounterStore(api),
       methods: PaymentMethodsStore(api),
       ledger: TefLedger(api, store, terminal, native),
+      notifications: NotificationsStore(api),
+      comandaLink: ComandaLinkStore(api),
     );
     // 401 = token revogado: derruba a sessão local e a raiz volta ao login.
     api.onUnauthorized = auth.clearLocal;
@@ -98,6 +106,7 @@ class App {
     cash.reset();
     counter.reset();
     methods.reset();
+    notifications.reset();
   }
 
   /// Nome enviado em `device_name` no login. Sem número de série: lê-lo exige

@@ -2,8 +2,32 @@ import 'package:flutter/services.dart';
 
 import 'storage.dart';
 
+/// Como terminou a leitura de QR pela câmera ([Native.scanQr]).
+enum QrScanStatus {
+  /// Leu: o conteúdo está em [QrScan.text].
+  read,
+
+  /// O operador voltou sem ler.
+  canceled,
+
+  /// O aparelho não tem câmera.
+  noCamera,
+
+  /// O operador negou a permissão da câmera.
+  denied,
+
+  /// Não há leitor aqui (prévia web, testes) ou a câmera não abriu.
+  unavailable,
+}
+
+class QrScan {
+  const QrScan(this.status, [this.text]);
+  final QrScanStatus status;
+  final String? text;
+}
+
 /// Canal com o `MainActivity` (Kotlin): deeplinks da Stone, preferências,
-/// token cifrado e dados do aparelho.
+/// token cifrado, dados do aparelho, leitor de QR (câmera) e imagem de QR.
 class Native implements KeyValueBackend {
   const Native();
 
@@ -41,6 +65,35 @@ class Native implements KeyValueBackend {
       return m ?? const {};
     } catch (_) {
       return const {};
+    }
+  }
+
+  /// Abre o leitor de QR do aparelho (câmera traseira, em retrato) e espera
+  /// o operador ler ou voltar. Nunca lança: onde o canal não existe (prévia
+  /// web, testes) devolve [QrScanStatus.unavailable].
+  Future<QrScan> scanQr({String? prompt}) async {
+    try {
+      final text = await _ch.invokeMethod<String>('scanQr', {'prompt': ?prompt});
+      return (text == null || text.isEmpty) ? const QrScan(QrScanStatus.canceled) : QrScan(QrScanStatus.read, text);
+    } on PlatformException catch (e) {
+      return QrScan(switch (e.code) {
+        'no_camera' => QrScanStatus.noCamera,
+        'denied' => QrScanStatus.denied,
+        _ => QrScanStatus.unavailable,
+      });
+    } catch (_) {
+      return const QrScan(QrScanStatus.unavailable);
+    }
+  }
+
+  /// PNG do QR de [text] com [size] px de lado, desenhado no lado nativo.
+  /// `null` onde não há como gerar (prévia web, testes): a tela mostra só o
+  /// código.
+  Future<Uint8List?> qrPng(String text, {int size = 480}) async {
+    try {
+      return await _ch.invokeMethod<Uint8List>('qrPng', {'text': text, 'size': size});
+    } catch (_) {
+      return null;
     }
   }
 

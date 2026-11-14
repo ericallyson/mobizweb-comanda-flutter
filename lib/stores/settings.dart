@@ -4,12 +4,11 @@ import '../core/api.dart';
 import '../core/config.dart';
 import '../core/storage.dart';
 
-/// Preferências do APARELHO (não do usuário): endereço da loja, grade de
+/// Preferências do APARELHO (não do usuário): endereço da loja, ordem das
 /// mesas, impressão e cobrança na maquininha. Sobrevivem ao logout.
 class Settings extends ChangeNotifier {
   Settings(this._store) {
     _serverInput = _store.getString('server_input') ?? Config.presetStore;
-    _gridCols = _store.getInt('grid_cols', 2).clamp(2, 4);
     _sortMode = _store.getString('sort_mode') ?? 'number';
     _printBill = _store.getBool('print_bill', true);
     _printOrders = _store.getBool('print_orders', false);
@@ -24,7 +23,6 @@ class Settings extends ChangeNotifier {
   final LocalStore _store;
 
   late String _serverInput;
-  late int _gridCols;
   late String _sortMode;
   late bool _printBill;
   late bool _printOrders;
@@ -40,8 +38,6 @@ class Settings extends ChangeNotifier {
 
   /// Origem do tenant, ex.: `https://minhaloja.mobizweb.com.br`.
   String get serverUrl => normalizeServerUrl(_serverInput, defaultDomain: Config.defaultDomain);
-
-  int get gridCols => _gridCols;
 
   /// `number` | `title` | `status`.
   String get sortMode => _sortMode;
@@ -71,8 +67,8 @@ class Settings extends ChangeNotifier {
   /// (o Android pode esconder de um app a existência de outro).
   bool get forceStone => _forceStone;
 
-  void setServerInput(String v) => _set(() => _serverInput = v.trim(), () => _store.setString('server_input', v.trim()));
-  void setGridCols(int v) => _set(() => _gridCols = v, () => _store.setInt('grid_cols', v));
+  void setServerInput(String v) =>
+      _set(() => _serverInput = v.trim(), () => _store.setString('server_input', v.trim()));
   void setSortMode(String v) => _set(() => _sortMode = v, () => _store.setString('sort_mode', v));
   void setPrintBill(bool v) => _set(() => _printBill = v, () => _store.setBool('print_bill', v));
   void setPrintOrders(bool v) => _set(() => _printOrders = v, () => _store.setBool('print_orders', v));
