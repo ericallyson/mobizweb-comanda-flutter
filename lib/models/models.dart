@@ -289,13 +289,22 @@ class MenuProduct {
     this.pizza,
     this.comboGroups = const [],
     this.code,
+    this.originalPrice,
+    this.promotion,
   });
   final String id;
   final String name;
 
-  /// Código (SKU) do cadastro. O cardápio do servidor ainda NÃO envia este
-  /// campo; a leitura já está pronta para quando enviar (usado na ficha).
+  /// Código (SKU) do cadastro, usado no código de barras da ficha. Servidor
+  /// antigo não envia: a ficha usa a posição do item na venda.
   final String? code;
+
+  /// Só com promoção vigente: o preço sem ela ("de") e o nome da promoção.
+  /// [price] é sempre o que será cobrado no canal pedido.
+  final double? originalPrice;
+  final String? promotion;
+
+  bool get onPromotion => originalPrice != null && originalPrice! > price + 0.004;
 
   /// `simple` | `pizza` | `combo`.
   final String type;
@@ -321,6 +330,8 @@ class MenuProduct {
     pizza: j['pizza'] is Map ? PizzaConfig.fromJson(asMap(j['pizza'])) : null,
     comboGroups: asList(j['combo_groups']).map(ComboGroup.fromJson).toList(),
     code: asStringOrNull(j['sku']) ?? asStringOrNull(j['code']),
+    originalPrice: j['original_price'] == null ? null : asDouble(j['original_price']),
+    promotion: asStringOrNull(j['promotion']),
   );
 }
 

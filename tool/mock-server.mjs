@@ -169,11 +169,32 @@ const idempotency = new Map();
 const tokens = new Set();
 
 // ── Regras simplificadas ────────────────────────────────────────────────────
+// MOCK_PROMO=10 liga uma promoção de 10% ("Happy hour") nos produtos que não
+// são pizza. Como no servidor real, o cardápio já devolve o preço com a
+// promoção, o preço sem ela e o nome. MOCK_PROMO_HIDDEN=1 imita um servidor
+// antigo: o pedido é gravado com a promoção, mas o cardápio mostra o preço de
+// cadastro (o app avisa a diferença em "Venda recebida").
+const PROMO = Number(process.env.MOCK_PROMO ?? 0);
+const PROMO_HIDDEN = process.env.MOCK_PROMO_HIDDEN === '1';
+const promoPrice = (p) => (PROMO > 0 && p.type !== 'pizza' ? round2(p.price * (1 - PROMO / 100)) : p.price);
+
+function menuPayload() {
+    let n = 0;
+    return menu.map((c) => ({
+        ...c,
+        products: c.products.map((p) => {
+            const sku = String(1001 + n++);
+            if (!(PROMO > 0) || PROMO_HIDDEN || p.type === 'pizza') return { ...p, sku, original_price: null, promotion: null };
+            return { ...p, sku, price: promoPrice(p), original_price: p.price, promotion: 'Happy hour' };
+        }),
+    }));
+}
+
 function priceItem(body) {
     const p = allProducts().find((x) => x.id === body.product_id);
     if (!p) throw fail(422, 'Produto não encontrado.');
     if (!p.is_available) throw fail(422, `Produto indisponível: ${p.name}`, { stock: [`${p.name} está em falta. Disponível: 0`] });
-    let price = p.price;
+    let price = promoPrice(p);
     const selectedFlavors = [];
     if (p.type === 'pizza') {
         const chosen = p.pizza.flavor_group.items.filter((f) => (body.selected_flavor_ids ?? []).includes(f.id));
@@ -349,7 +370,7 @@ const routes = [
     ['POST', '/auth/logout', () => ({})],
     ['GET', '/auth/me', () => ({ user, permissions: PERMS })],
     ['POST', '/stores/:id/select', (m) => { activeStore = need(stores.find((s) => s.id === m.id), 'Loja'); return { store: activeStore }; }],
-    ['GET', '/menu', () => ({ categories: menu })],
+    ['GET', '/menu', () => ({ categories: menuPayload() })],
     ['GET', '/payment-methods', () => ({ payment_methods: paymentMethods, pix_online: { code: 'mp_pix', label: 'Pix Mercado Pago' } })],
     ['GET', '/tables', () => ({
         settings: { enable_comandas: true, idle_alert_minutes: IDLE_ALERT_MINUTES },
@@ -593,11 +614,7 @@ const routes = [
     ['GET', '/counter/context', () => ({ enabled: true, permissions: { sell: true }, payment_methods: paymentMethods, cash_session: cash?.status === 'open' ? { id: cash.id, opened_at: cash.opened_at } : null })],
     ['POST', '/counter/checkout', (m, b) => {
         if (!Array.isArray(b.items) || !b.items.length) throw fail(422, 'Informe ao menos um item.');
-        // MOCK_PROMO=10 simula uma promoção de 10% que o cardápio não mostra
-        // (o servidor real recalcula o preço com promoções e tabelas).
-        const promo = Number(process.env.MOCK_PROMO ?? 0);
-        const full = round2(b.items.reduce((a, it) => a + priceItem(it).unit_price * Number(it.quantity), 0));
-        const total = round2(full * (1 - promo / 100));
+        const total = round2(b.items.reduce((a, it) => a + priceItem(it).unit_price * Number(it.quantity), 0));
         const paid = round2((b.payments ?? []).reduce((a, p) => a + Number(p.amount), 0));
         if (paid < total - 0.005) throw fail(422, 'O valor recebido não cobre o total da venda.');
         for (const p of b.payments) cashHistory.payments.push({ method: p.method, amount: Math.min(Number(p.amount), total) });

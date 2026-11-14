@@ -646,12 +646,38 @@ class _ProductCard extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: T.s(12, c: C.sub, h: 1.3),
                               ),
-                            Text(
-                              price.from ? 'a partir de ${brl(price.value)}' : brl(price.value),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: T.num(13, h: 1.35),
-                            ),
+                            if (p.onPromotion && !price.from)
+                              // Promoção vigente: "de" riscado, "por" e o nome.
+                              Text.rich(
+                                TextSpan(
+                                  children: [
+                                    TextSpan(
+                                      text: '${brl(p.originalPrice!)} ',
+                                      style: T.s(
+                                        12,
+                                        c: C.sub,
+                                        h: 1.35,
+                                      ).copyWith(decoration: TextDecoration.lineThrough),
+                                    ),
+                                    TextSpan(text: brl(price.value)),
+                                    if (p.promotion != null)
+                                      TextSpan(
+                                        text: '  ${p.promotion}',
+                                        style: T.s(11.5, w: T.semibold, c: C.greenText, h: 1.35),
+                                      ),
+                                  ],
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: T.num(13, c: C.greenText, h: 1.35),
+                              )
+                            else
+                              Text(
+                                price.from ? 'a partir de ${brl(price.value)}' : brl(price.value),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: T.num(13, h: 1.35),
+                              ),
                           ],
                         ),
                       ),

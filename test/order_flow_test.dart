@@ -468,6 +468,26 @@ void main() {
     });
   });
 
+  group('preço do cardápio com promoção', () {
+    test('lê o preço cobrado, o preço sem promoção, o nome e o código do produto', () {
+      final p = MenuProduct.fromJson(
+        _product('lata', 'Refrigerante lata', 5.4, {'original_price': 6, 'promotion': 'Happy hour', 'sku': '1001'}),
+      );
+      expect((p.price, p.originalPrice, p.promotion, p.code), (5.4, 6.0, 'Happy hour', '1001'));
+      expect(p.onPromotion, isTrue);
+      // O carrinho soma o preço cobrado, que é o que o servidor grava.
+      final cart = OrderCart()..addOne(p);
+      expect(cart.total, 5.4);
+    });
+
+    test('servidor antigo ou produto sem promoção: nada muda', () {
+      final p = MenuProduct.fromJson(_product('lata', 'Refrigerante lata', 6));
+      expect((p.originalPrice, p.promotion, p.code, p.onPromotion), (null, null, null, false));
+      final same = MenuProduct.fromJson(_product('lata', 'Refrigerante lata', 6, {'original_price': 6, 'promotion': null}));
+      expect(same.onPromotion, isFalse);
+    });
+  });
+
   group('carrinho (OrderCart)', () {
     final guarana = MenuProduct.fromJson(_product('guarana', 'Guaraná Lata', 7));
 

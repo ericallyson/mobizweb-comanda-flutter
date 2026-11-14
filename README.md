@@ -202,18 +202,17 @@ balcão em duas formas, QR do tablet e leitura do QR da comanda).
 
 ## Limites conhecidos
 
-- **Preço com promoção só aparece depois de gravar.** O cardápio da API do
-  garçom traz o preço de cadastro, mas o servidor recalcula a venda com
-  promoções e tabelas de preço. Na mesa isso não aparece, porque o total é
-  sempre o do servidor. No balcão, quando o servidor grava por menos, "Venda
-  recebida" e o comprovante mostram o desconto; em dinheiro a diferença vira
-  troco, e em cartão ou Pix a tela avisa quanto foi cobrado a mais. Para o
-  valor certo aparecer ANTES de receber, o cardápio do servidor precisa
-  devolver o preço já resolvido.
-- **Código do produto na ficha.** O cardápio não envia o código (SKU) do
-  produto. Enquanto não enviar, o código de barras usa a posição do item na
-  venda (`001`, `002`…) depois do número da venda. O app já lê o campo `sku`
-  quando ele vier.
+- **Preço com promoção depende da versão do servidor.** O Mobizweb novo
+  devolve no cardápio o preço que o pedido grava (lista de preço do canal e
+  promoção), o preço sem a promoção e o nome dela: o app mostra o "de/por" e
+  cobra o valor certo. Em servidor antigo o cardápio traz só o preço de
+  cadastro e a venda pode ser gravada por menos; nesse caso "Venda recebida"
+  e o comprovante mostram o desconto, o dinheiro vira troco e a tela avisa
+  quanto foi cobrado a mais em cartão ou Pix. O cardápio é relido a cada 3
+  minutos, então uma promoção que começa nesse intervalo cai no mesmo aviso.
+- **Código do produto na ficha.** O código de barras é o número da venda
+  seguido do código (SKU) do produto. Em servidor antigo, que não envia o
+  código, entra a posição do item na venda (`001`, `002`…).
 - **Corte do papel.** A impressão da Stone por deeplink não tem comando de
   corte. Cada ficha termina em uma linha de picote com folga para rasgar e
   nunca é partida entre duas imagens (`PCut` em `lib/print/receipt.dart` é o
