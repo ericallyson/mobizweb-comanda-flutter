@@ -52,6 +52,27 @@ class PFit extends PLine {
   final bool bold;
 }
 
+/// Linha em letra de largura fixa, já composta em [columns] colunas pelo
+/// servidor (o DANFE). `center` centraliza o texto curto; `big` sai maior
+/// quando cabe. Nunca quebra: linha mais larga que o papel é encolhida.
+class PMono extends PLine {
+  const PMono(this.text, {this.columns = 32, this.center = false, this.bold = false, this.big = false});
+  final String text;
+  final int columns;
+  final bool center;
+  final bool bold;
+  final bool big;
+}
+
+/// QR-Code centralizado (consulta da NFC-e). A imagem é gerada no lado
+/// nativo; onde não há como gerar (prévia, testes) a linha não sai, e o
+/// DANFE já traz a chave e o endereço de consulta escritos.
+class PQr extends PLine {
+  const PQr(this.data, {this.size = 240});
+  final String data;
+  final double size;
+}
+
 /// Código de barras Code 128 centralizado. No modo imagem é desenhado; no
 /// modo texto vai como uma imagem pequena no meio das linhas.
 class PBarcode extends PLine {
@@ -386,3 +407,14 @@ List<PLine> cashCloseSlip({
     const PGap(36),
   ];
 }
+
+/// DANFE NFC-e: as linhas vêm prontas do servidor (montadas do XML
+/// autorizado); aqui só viram linhas de impressão.
+List<PLine> danfeReceipt(FiscalNote note) => [
+  for (final l in note.lines)
+    if (l.qr)
+      PQr(l.text)
+    else
+      PMono(l.text, columns: note.columns, center: l.center, bold: l.bold, big: l.big),
+  const PGap(36),
+];

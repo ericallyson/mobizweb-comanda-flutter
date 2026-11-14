@@ -15,6 +15,7 @@ import 'package:mobizweb_pos/app.dart';
 import 'package:mobizweb_pos/core/storage.dart';
 import 'package:mobizweb_pos/main.dart';
 import 'package:mobizweb_pos/models/models.dart';
+import 'package:mobizweb_pos/print/receipt.dart';
 import 'package:mobizweb_pos/stores/comanda_link.dart';
 import 'package:mobizweb_pos/stores/receive.dart';
 import 'package:mobizweb_pos/ui/kit.dart';
@@ -61,8 +62,14 @@ typedef _Call = ({String method, String path, Map<String, dynamic> body, Map<Str
 /// Mini-servidor em memória com a mesa 2 aberta: 2 long necks e 1 x-burger
 /// (R$ 44,00 + 10% = R$ 48,40). Guarda as chamadas e fecha a mesa ao quitar.
 class _Server {
-  _Server({this.perms = _allPerms, this.comandas = false});
+  _Server({this.perms = _allPerms, this.comandas = false, this.fiscal = false});
   final Map<String, bool> perms;
+
+  /// A loja tem emissão fiscal ativa (`counter/context`).
+  final bool fiscal;
+
+  /// A SEFAZ falsa rejeita a nota pedida.
+  bool rejectFiscal = false;
 
   /// Mesa 2 com as comandas "Ana" e "Bia".
   final bool comandas;
@@ -213,6 +220,22 @@ class _Server {
             {'code': 'card_credit', 'name': 'Crédito', 'method': 'credit_card'},
           ],
           'cash_session': null,
+          if (fiscal) 'fiscal': {'active': true},
+        });
+      case '/counter/orders/o1/fiscal':
+        if (rejectFiscal) {
+          return _json(422, {'error': 'A NFC-e não foi autorizada: Rejeição 539. A venda segue concluída e contada no caixa.'});
+        }
+        return _json(200, {
+          'nfce': {'status': 'authorized', 'series': 1, 'number': 1201, 'access_key': '3526', 'is_contingency': false},
+          'danfe': {
+            'columns': 32,
+            'lines': [
+              {'text': 'BAR DO ZE LTDA', 'align': 'center', 'bold': true, 'big': false, 'qr': false},
+              {'text': 'VALOR A PAGAR R\$          14,00', 'align': 'left', 'bold': true, 'big': false, 'qr': false},
+              {'text': 'https://sefaz/qr?p=3526', 'align': 'center', 'bold': false, 'big': false, 'qr': true},
+            ],
+          },
         });
       case '/counter/checkout':
         return _json(201, {
@@ -1089,5 +1112,68 @@ void main() {
     expect(debit.systemDiscount, 6);
     expect(debit.overcharged, 6);
     debit.dispose();
+  });
+
+  test('nota fiscal sob demanda: venda sai sem nota, a nota é emitida uma vez e a rejeição mostra o motivo', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    Future<(CounterReceiveController, _Server)> sold({required bool fiscal}) async {
+      final server = _Server(fiscal: fiscal);
+      final boot = await App.boot(
+        backend: MemoryBackend()..values['server_input'] = 'bardoze',
+        client: MockClient(server.handle),
+        probeDevice: false,
+      );
+      await boot.counter.fetchContext();
+      final c = CounterReceiveController(
+        saleTotal: 14,
+        options: const [],
+        parts: [],
+        items: const [],
+        cartKey: 'k-fiscal-$fiscal',
+        counter: boot.counter,
+        ledger: boot.ledger,
+        terminal: boot.terminal,
+      );
+      expect(c.fiscalAvailable, isFalse);
+      expect((await c.receive(amount: 14)).kind, ReceiveOutcomeKind.done);
+      return (c, server);
+    }
+
+    // Loja sem fiscal (ou servidor antigo): nada muda no envio e não há botão.
+    final (plain, plainServer) = await sold(fiscal: false);
+    expect(plainServer.mutations.single.body.containsKey('non_fiscal'), isFalse);
+    expect(plain.fiscalAvailable, isFalse);
+    plain.dispose();
+
+    // Loja fiscal: a venda vai marcada como sem nota e a tela oferece a nota.
+    final (c, server) = await sold(fiscal: true);
+    expect(server.mutations.single.body['non_fiscal'], isTrue);
+    expect(c.fiscalAvailable, isTrue);
+    expect(c.fiscalNote, isNull);
+
+    // SEFAZ rejeita: o motivo fica na tela e a venda continua recebida.
+    server.rejectFiscal = true;
+    expect(await c.issueFiscal(), isNull);
+    expect(c.fiscalError, contains('Rejeição 539'));
+    expect(c.sale, isNotNull);
+
+    // Tenta de novo e autoriza.
+    server.rejectFiscal = false;
+    final note = await c.issueFiscal();
+    expect((note?.number, note?.series, note?.columns), (1201, 1, 32));
+    expect(c.fiscalError, isNull);
+    final calls = server.mutations.where((m) => m.path == '/counter/orders/o1/fiscal').toList();
+    expect(calls, hasLength(2));
+    expect(calls.last.headers['Idempotency-Key'], 'fiscal-o1');
+
+    // Tocar de novo reimprime a MESMA nota, sem pedir outra ao servidor.
+    expect(identical(await c.issueFiscal(), note), isTrue);
+    expect(server.mutations.where((m) => m.path == '/counter/orders/o1/fiscal'), hasLength(2));
+
+    // O DANFE vira linhas de largura fixa com o QR no lugar marcado.
+    final lines = danfeReceipt(note!);
+    expect(lines.whereType<PMono>().map((l) => (l.text, l.center, l.bold, l.columns)).first, ('BAR DO ZE LTDA', true, true, 32));
+    expect(lines.whereType<PQr>().single.data, 'https://sefaz/qr?p=3526');
+    c.dispose();
   });
 }

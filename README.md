@@ -45,8 +45,14 @@ acompanhar as vendas: o app só consome a API `/api/garcom/v1`.
 - **Fichas de evento** (opcional, em Configurações): depois de receber a venda
   de balcão, imprime uma ficha por produto pago, com o número da venda, a data
   e a hora, o nome do produto em destaque e um código de barras (número da
-  venda seguido do código do produto). "Venda recebida" tem o botão para
-  imprimir as fichas de novo.
+  venda seguido do código do produto). As fichas saem uma vez só: não há
+  reimpressão, por segurança.
+- **Nota fiscal sob demanda**: em loja com emissão fiscal ativa a venda de
+  balcão fecha sem nota e "Venda recebida" mostra "Imprimir venda" (comprovante
+  comum) e "Imprimir nota" (emite a NFC-e e imprime o DANFE com QR-Code na
+  maquininha). Nada sai sozinho, para não imprimir os dois; depois que a nota
+  existe, só ela é oferecida. Nota rejeitada mostra o motivo e a venda segue
+  recebida.
 - **Caixa**: abertura, suprimento, sangria, detalhes e fechamento (inclusive
   fechamento cego).
 - **Impressão na maquininha** (configurável): conta, via do pedido, venda de

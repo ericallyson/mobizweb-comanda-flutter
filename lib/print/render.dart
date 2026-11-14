@@ -32,7 +32,11 @@ const bigTextColumns = 16;
 /// Código de barras não existe em texto: [barcodes] traz o PNG (base64) de
 /// cada [PBarcode], na ordem em que aparecem (ver [renderBarcodesBase64]).
 /// Sem ele, o número já sai escrito na linha seguinte do documento.
-List<StonePrintable> toStoneText(List<PLine> lines, {List<String?> barcodes = const []}) {
+List<StonePrintable> toStoneText(
+  List<PLine> lines, {
+  List<String?> barcodes = const [],
+  Map<String, Uint8List> qrs = const {},
+}) {
   final out = <StonePrintable>[];
   var barcode = 0;
   for (final l in lines) {
@@ -52,6 +56,14 @@ List<StonePrintable> toStoneText(List<PLine> lines, {List<String?> barcodes = co
         out.add(StonePrintable.line('-' * 32));
       case PGap():
         out.add(const StonePrintable.line(' '));
+      case PMono():
+        // O servidor compôs em 32 colunas, a largura do tamanho `medium`.
+        final text = l.center ? l.text.trim() : l.text;
+        final big = l.big && text.length <= bigTextColumns;
+        out.add(StonePrintable.text(text, align: l.center ? 'center' : 'left', size: big ? 'big' : 'medium'));
+      case PQr():
+        final png = qrs[l.data];
+        if (png != null) out.add(StonePrintable.image(base64Encode(png)));
       case PFit():
         // Uma linha só: o maior tamanho da Stone em que o texto cabe.
         final size = l.text.length <= bigTextColumns
@@ -148,10 +160,80 @@ TextPainter _fit(PFit l, double width) {
   return build(l.minSize, clip: true);
 }
 
-List<_Block> _layout(List<PLine> lines, double width) {
+/// Largura de uma letra da fonte de largura fixa, por ponto de tamanho.
+/// Medida uma vez (depende da fonte do aparelho).
+double? _monoAdvance;
+
+TextStyle _monoStyle(double size, bool bold) => TextStyle(
+  color: _ink,
+  // Fonte embutida no app (pubspec): a mesma largura em qualquer aparelho.
+  fontFamily: 'DanfeMono',
+  fontFamilyFallback: const ['monospace'],
+  fontSize: size,
+  fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+  height: 1.3,
+);
+
+/// Linha de largura fixa ([PMono]): o tamanho da letra é o que faz [columns]
+/// letras ocuparem a largura do papel; `big` dobra quando o texto cabe.
+/// Linha mais comprida que o previsto é encolhida, nunca quebrada.
+TextPainter _mono(PMono l, double width) {
+  TextPainter build(double size) => TextPainter(
+    text: TextSpan(text: l.center ? l.text.trim() : l.text, style: _monoStyle(size, l.bold || l.big)),
+    maxLines: 1,
+    textDirection: TextDirection.ltr,
+  )..layout();
+
+  _monoAdvance ??= () {
+    final probe = TextPainter(
+      text: TextSpan(text: 'M' * 32, style: _monoStyle(20, false)),
+      maxLines: 1,
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final advance = probe.width / 32 / 20;
+    probe.dispose();
+    return advance > 0 ? advance : 0.6;
+  }();
+
+  final base = (width / (l.columns * _monoAdvance!)).floorToDouble().clamp(10.0, 30.0);
+  var tp = build(l.big ? base * 2 : base);
+  if (tp.width > width && l.big) {
+    tp.dispose();
+    tp = build(base);
+  }
+  var size = base;
+  while (tp.width > width && size > 8) {
+    size -= 1;
+    tp.dispose();
+    tp = build(size);
+  }
+  return tp;
+}
+
+List<_Block> _layout(List<PLine> lines, double width, [Map<String, ui.Image> qrs = const {}]) {
   final blocks = <_Block>[];
   for (final l in lines) {
     switch (l) {
+      case PMono():
+        final tp = _mono(l, width);
+        final x = l.center ? (width - tp.width) / 2 : 0.0;
+        blocks.add(_Block(tp.height, (c, y) => tp.paint(c, ui.Offset(x < 0 ? 0 : x, y))));
+      case PQr():
+        final image = qrs[l.data];
+        // Sem imagem (prévia, testes): o DANFE já traz a chave e o endereço.
+        if (image == null) break;
+        final side = l.size > width ? width : l.size;
+        blocks.add(
+          _Block(side + 16, (c, y) {
+            c.drawImageRect(
+              image,
+              ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+              ui.Rect.fromLTWH((width - side) / 2, y + 8, side, side),
+              // Sem suavizar: os módulos do QR precisam de borda seca.
+              ui.Paint()..filterQuality = ui.FilterQuality.none,
+            );
+          }),
+        );
       case PText():
         final align = switch (l.align) {
           PAlign.left => TextAlign.left,
@@ -289,12 +371,26 @@ List<List<_Block>> _paginate(List<_Block> blocks, double maxHeight) {
 /// Renderiza o documento em PNGs de 384 px de largura, quebrando SEMPRE entre
 /// linhas e respeitando [maxHeight] por imagem (terminais antigos recusam
 /// imagem alta — a doc da Stone cita 380×595 no APOS A8).
+///
+/// [qrs] traz o PNG de cada [PQr], pela chave do conteúdo (o QR é gerado no
+/// lado nativo; ver `Terminal.printLines`).
 Future<List<Uint8List>> renderReceiptPng(
   List<PLine> lines, {
   int width = Config.paperWidthPx,
   double maxHeight = 560,
+  Map<String, Uint8List> qrs = const {},
 }) async {
-  final pages = _paginate(_layout(lines, width.toDouble()), maxHeight);
+  final images = <String, ui.Image>{};
+  for (final e in qrs.entries) {
+    try {
+      final codec = await ui.instantiateImageCodec(e.value);
+      images[e.key] = (await codec.getNextFrame()).image;
+      codec.dispose();
+    } catch (_) {
+      // PNG inválido: o DANFE sai sem o QR (a chave vai escrita).
+    }
+  }
+  final pages = _paginate(_layout(lines, width.toDouble(), images), maxHeight);
 
   final out = <Uint8List>[];
   for (final page in pages) {
@@ -313,6 +409,9 @@ Future<List<Uint8List>> renderReceiptPng(
     image.dispose();
     picture.dispose();
     if (bytes != null) out.add(bytes.buffer.asUint8List());
+  }
+  for (final image in images.values) {
+    image.dispose();
   }
   return out;
 }

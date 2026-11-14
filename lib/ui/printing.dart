@@ -91,9 +91,12 @@ Future<bool> printCounterTickets(
   required List<CartItem> items,
 }) => _print(context, counterTickets(number: sale.number, items: items));
 
-/// O que sai no papel depois de uma venda de balcão, UM de cada vez (a
-/// impressora só atende uma chamada por vez): comprovante e depois as fichas,
-/// conforme as opções ligadas em Configurações.
+/// O que sai sozinho no papel depois de uma venda de balcão, UM de cada vez:
+/// o comprovante e depois as fichas, conforme as opções de Configurações.
+///
+/// Em loja com emissão fiscal o comprovante NÃO sai sozinho: "Venda recebida"
+/// tem "Imprimir venda" e "Imprimir nota" e o operador escolhe um dos dois,
+/// para não sair cupom comum e nota fiscal da mesma venda.
 Future<void> printAfterCounterSale(
   BuildContext context, {
   required CounterSaleResult sale,
@@ -102,7 +105,8 @@ Future<void> printAfterCounterSale(
   String? customerName,
 }) async {
   if (!app.terminal.canPrint) return;
-  if (app.settings.printCounter) {
+  final fiscal = app.counter.context?.fiscalActive ?? false;
+  if (app.settings.printCounter && !fiscal) {
     await printCounterSale(context, sale: sale, items: items, payments: payments, customerName: customerName);
   }
   if (app.settings.printTickets && context.mounted) {

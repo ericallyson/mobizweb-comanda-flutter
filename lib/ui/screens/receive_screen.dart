@@ -98,6 +98,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   bool _cashEdited = false;
   bool _closing = false;
   bool _printing = false;
+  bool _printingSale = false;
 
   /// Troco do último pagamento em dinheiro (aparece em "Conta paga").
   double _lastChange = 0;
@@ -288,14 +289,34 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
-  /// Fichas da venda de balcão, de novo (papel acabou, ficha rasgou).
-  Future<void> _printTickets() async {
+  /// "Imprimir nota": emite a NFC-e da venda (uma vez só) e imprime o DANFE
+  /// na maquininha. Tocar de novo reimprime a mesma nota.
+  Future<void> _printFiscal() async {
+    final counter = _counter;
+    if (_printing || counter == null) return;
+    setState(() => _printing = true);
+    final note = await counter.issueFiscal();
+    if (note != null && mounted) {
+      final error = await app.terminal.printLines(danfeReceipt(note));
+      if (error != null && mounted) toast(context, 'Nota emitida, mas não imprimiu: $error', error: true);
+    }
+    if (mounted) setState(() => _printing = false);
+  }
+
+  /// "Imprimir venda": o comprovante comum (não fiscal) da venda de balcão.
+  Future<void> _printSale() async {
     final counter = _counter;
     final sale = counter?.sale;
-    if (_printing || counter == null || sale == null) return;
-    setState(() => _printing = true);
-    await printCounterTickets(context, sale: sale, items: counter.items);
-    if (mounted) setState(() => _printing = false);
+    if (_printingSale || counter == null || sale == null) return;
+    setState(() => _printingSale = true);
+    await printCounterSale(
+      context,
+      sale: sale,
+      items: counter.items,
+      payments: [for (final p in counter.salePayments) (label: p.label, amount: p.amount)],
+      customerName: counter.customerName,
+    );
+    if (mounted) setState(() => _printingSale = false);
   }
 
   // ── Textos ────────────────────────────────────────────────────────────────
@@ -796,14 +817,48 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               style: T.s(12, c: C.sub, h: 1.35),
             ),
         ],
-        if (sale != null && app.settings.printTickets && app.terminal.canPrint) ...[
+        if (counter != null && counter.fiscalAvailable) ...[
           const SizedBox(height: 12),
-          Btn(
-            'Imprimir as fichas de novo',
-            kind: BtnKind.secondary,
-            icon: Icons.confirmation_number_outlined,
-            loading: _printing,
-            onTap: _printTickets,
+          if (counter.fiscalNote != null) ...[
+            Note(
+              counter.fiscalNote!.number != null
+                  ? 'NFC-e nº ${counter.fiscalNote!.number} emitida para esta venda.'
+                  : 'NFC-e emitida para esta venda.',
+              kind: NoteKind.info,
+              radius: 12,
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (counter.fiscalError != null) ...[
+            Note(counter.fiscalError!, kind: NoteKind.error, radius: 12),
+            const SizedBox(height: 8),
+          ],
+          // Um cupom ou outro: nada sai sozinho e o operador escolhe. Depois
+          // que a nota existe, o comprovante comum deixa de ser oferecido.
+          Row(
+            children: [
+              if (counter.fiscalNote == null) ...[
+                Expanded(
+                  child: Btn(
+                    'Imprimir venda',
+                    kind: BtnKind.secondary,
+                    icon: Icons.print_outlined,
+                    loading: _printingSale,
+                    onTap: _printing || counter.issuingFiscal ? null : _printSale,
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Btn(
+                  'Imprimir nota',
+                  kind: BtnKind.secondary,
+                  icon: Icons.receipt_long_outlined,
+                  loading: _printing || counter.issuingFiscal,
+                  onTap: _printingSale ? null : _printFiscal,
+                ),
+              ),
+            ],
           ),
         ],
         if (canPrint) ...[

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobizweb_pos/core/addon_rules.dart';
 import 'package:mobizweb_pos/models/models.dart';
@@ -376,6 +378,46 @@ void main() {
       ).whereType<PRow>().map((r) => r.left).toList();
       expect(rows, isNot(contains('Subtotal')));
       expect(rows, isNot(contains('Desconto')));
+    });
+  });
+
+  group('DANFE NFC-e na maquininha', () {
+    const note = FiscalNote(
+      number: 1201,
+      series: 1,
+      lines: [
+        DanfeLine('BAR DO ZE LTDA', center: true, bold: true),
+        DanfeLine('--------------------------------'),
+        DanfeLine('VALOR A PAGAR R\$          14,00', bold: true),
+        DanfeLine('https://sefaz/qr?p=3526', center: true, qr: true),
+        DanfeLine('Chave de acesso muito comprida que passa das trinta e duas colunas'),
+      ],
+    );
+    final lines = danfeReceipt(note);
+
+    test('modo texto: linhas no tamanho de 32 colunas e o QR como imagem', () {
+      final out = toStoneText(lines, qrs: {'https://sefaz/qr?p=3526': Uint8List.fromList([1, 2, 3])});
+      expect(out.first.content, 'BAR DO ZE LTDA');
+      expect((out.first.align, out.first.size), ('center', 'medium'));
+      expect(out[2].content, 'VALOR A PAGAR R\$          14,00');
+      expect(out.where((p) => p.type == 'image').single.imageBase64, 'AQID');
+      // Sem a imagem do QR (prévia, testes) a linha simplesmente não sai.
+      expect(toStoneText(lines).where((p) => p.type == 'image'), isEmpty);
+    });
+
+    test('imagem: cada linha ocupa uma linha só, mesmo a que passa da largura', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      int height(List<int> png) => (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
+      final one = height((await renderReceiptPng(const [PMono('TOTAL')])).single);
+      final long = height(
+        (await renderReceiptPng(const [
+          PMono('Chave de acesso muito comprida que passa das trinta e duas colunas'),
+        ])).single,
+      );
+      // Linha comprida é encolhida (fica mais baixa), nunca vira duas.
+      expect(long, lessThanOrEqualTo(one));
+      // O documento inteiro renderiza sem a imagem do QR.
+      expect(await renderReceiptPng(lines, maxHeight: 4000), hasLength(1));
     });
   });
 }

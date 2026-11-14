@@ -611,7 +611,16 @@ const routes = [
         comandaLinks.set(card.id, s.id);
         return { link: presentLink(card) };
     }],
-    ['GET', '/counter/context', () => ({ enabled: true, permissions: { sell: true }, payment_methods: paymentMethods, cash_session: cash?.status === 'open' ? { id: cash.id, opened_at: cash.opened_at } : null })],
+    // MOCK_FISCAL=1: loja com emissão fiscal ativa (o app oferece "Imprimir
+    // nota fiscal"); MOCK_FISCAL=reject faz a SEFAZ falsa rejeitar a nota.
+    ['GET', '/counter/context', () => ({ enabled: true, permissions: { sell: true }, payment_methods: paymentMethods, cash_session: cash?.status === 'open' ? { id: cash.id, opened_at: cash.opened_at } : null, fiscal: { active: Boolean(process.env.MOCK_FISCAL) } })],
+    ['POST', '/counter/orders/:id/fiscal', (m) => {
+        const sale = need(counterSales.get(m.id), 'Venda');
+        if (!process.env.MOCK_FISCAL) throw fail(422, 'Esta loja não tem emissão fiscal ativa.');
+        if (process.env.MOCK_FISCAL === 'reject') throw fail(422, 'A NFC-e não foi autorizada: Rejeição 539: Duplicidade de NF-e. A venda segue concluída e contada no caixa.');
+        sale.nfce ??= ++nfceNumber;
+        return fiscalNote(sale);
+    }],
     ['POST', '/counter/checkout', (m, b) => {
         if (!Array.isArray(b.items) || !b.items.length) throw fail(422, 'Informe ao menos um item.');
         const total = round2(b.items.reduce((a, it) => a + priceItem(it).unit_price * Number(it.quantity), 0));
@@ -620,9 +629,61 @@ const routes = [
         for (const p of b.payments) cashHistory.payments.push({ method: p.method, amount: Math.min(Number(p.amount), total) });
         cashHistory.orders += 1;
         cashHistory.ordersTotal = round2(cashHistory.ordersTotal + total);
-        return { order: { id: randomUUID(), number: ++saleNumber, total, change_amount: round2(Math.max(0, paid - total)), cash_session_id: cash?.id ?? null }, receipt: { status: 'skipped', requires_operator_decision: false, block_reason: null } };
+        const id = randomUUID();
+        counterSales.set(id, { number: ++saleNumber, total, paid, items: b.items.map((it) => ({ ...priceItem(it), quantity: Number(it.quantity) })), payments: b.payments, non_fiscal: Boolean(b.non_fiscal) });
+        return { order: { id, number: saleNumber, total, change_amount: round2(Math.max(0, paid - total)), cash_session_id: cash?.id ?? null }, receipt: { status: 'printed_non_fiscal', requires_operator_decision: false, block_reason: null } };
     }],
 ];
+
+// DANFE NFC-e falso em 32 colunas, no formato de counter/orders/{id}/fiscal.
+const counterSales = new Map();
+let nfceNumber = 1200;
+function fiscalNote(sale) {
+    const COLS = 32;
+    const money = (v) => v.toFixed(2).replace('.', ',');
+    const row = (l, r) => l.slice(0, COLS - r.length - 1).padEnd(COLS - r.length) + r;
+    const key = '3526 1112 3456 7800 0190 6500 1000 0012 0010 0001 2345'.replace('1200', String(sale.nfce).padStart(4, '0'));
+    const qr = `https://www.homologacao.nfce.fazenda.sp.gov.br/qrcode?p=${key.replace(/ /g, '')}|2|2|1|ABCDEF0123456789`;
+    const L = [];
+    const left = (text, o = {}) => L.push({ text, align: 'left', bold: false, big: false, qr: false, ...o });
+    const center = (text, o = {}) => L.push({ text, align: 'center', bold: false, big: false, qr: false, ...o });
+    const sep = () => left('-'.repeat(COLS));
+    center('RESTAURANTE DEMO LTDA', { bold: true });
+    center('CNPJ: 12.345.678/0001-90');
+    center('Rua Teste, 123, Centro');
+    center('Sao Paulo - SP');
+    sep();
+    center('Documento Auxiliar da Nota Fiscal', { bold: true });
+    center('de Consumidor Eletronica - NFC-e', { bold: true });
+    sep();
+    left(row('ITEM', 'TOTAL'), { bold: true });
+    for (const it of sale.items) {
+        left(it.name.slice(0, COLS));
+        left(row(`  ${it.quantity} UN x ${money(it.unit_price)}`, money(it.unit_price * it.quantity)));
+    }
+    sep();
+    left(row('QTDE TOTAL DE ITENS', String(sale.items.length)));
+    left(row('VALOR A PAGAR R$', money(sale.total)), { bold: true });
+    for (const p of sale.payments) left(row(p.method === 'cash' ? 'Dinheiro' : p.method, money(Number(p.amount))));
+    if (sale.paid > sale.total) left(row('Troco R$', money(sale.paid - sale.total)));
+    sep();
+    center('Consulte pela Chave de Acesso em');
+    center('www.nfce.fazenda.sp.gov.br');
+    center(key.slice(0, 29));
+    center(key.slice(30));
+    L.push({ text: qr, align: 'center', bold: false, big: false, qr: true });
+    sep();
+    center('CONSUMIDOR NAO IDENTIFICADO');
+    center(`NFC-e n. ${sale.nfce} Serie 1`);
+    center(now().slice(0, 19).replace('T', ' '));
+    center('Protocolo: 135260000012345');
+    center('EMITIDA EM AMBIENTE DE HOMOLOGACAO', { bold: true });
+    sep();
+    return {
+        nfce: { status: 'authorized', status_label: 'Autorizada', is_contingency: false, series: 1, number: sale.nfce, access_key: key.replace(/ /g, ''), protocol_number: '135260000012345', authorized_at: now(), qr_url: qr },
+        danfe: { columns: COLS, lines: L },
+    };
+}
 
 function newPix(amount) {
     const id = `pix_${randomUUID().slice(0, 8)}`;

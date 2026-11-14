@@ -98,18 +98,39 @@ class Terminal {
     }
   }
 
+  /// Fim do último documento mandado para a impressora.
+  Future<void> _lastPrint = Future<void>.value();
+
   /// Imprime o documento. Devolve `null` se imprimiu ou a mensagem do erro.
-  Future<String?> printLines(List<PLine> lines) async {
+  ///
+  /// Um documento de cada vez: a impressora só atende uma chamada, então um
+  /// pedido feito enquanto outro imprime (as fichas saindo e o operador toca
+  /// em "Imprimir nota") espera a vez em vez de derrubar o que está saindo.
+  Future<String?> printLines(List<PLine> lines) {
+    final job = _lastPrint.then((_) => _printNow(lines));
+    _lastPrint = job.then((_) {}, onError: (_) {});
+    return job;
+  }
+
+  Future<String?> _printNow(List<PLine> lines) async {
     if (!canPrint) return 'Impressora indisponível neste aparelho.';
+    // QR-Codes do documento (DANFE): a imagem vem do lado nativo.
+    final qrs = <String, Uint8List>{};
+    for (final q in lines.whereType<PQr>()) {
+      if (qrs.containsKey(q.data)) continue;
+      final png = await _native.qrPng(q.data, size: q.size.round());
+      if (png != null) qrs[q.data] = png;
+    }
+
     if (_demo) {
       final preview = onPreview;
-      if (preview != null) await preview(await renderReceiptPng(lines, maxHeight: 4000));
+      if (preview != null) await preview(await renderReceiptPng(lines, maxHeight: 4000, qrs: qrs));
       return null;
     }
 
     final calls = _settings.printAsText
-        ? [toStoneText(lines, barcodes: await renderBarcodesBase64(lines))]
-        : toStoneImageCalls(await renderReceiptPng(lines));
+        ? [toStoneText(lines, barcodes: await renderBarcodesBase64(lines), qrs: qrs)]
+        : toStoneImageCalls(await renderReceiptPng(lines, qrs: qrs));
     // Sequencial e síncrono, como a Stone orienta: cada chamada espera a
     // resposta da anterior.
     try {

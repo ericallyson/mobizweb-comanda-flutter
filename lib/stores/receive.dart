@@ -457,6 +457,40 @@ class CounterReceiveController extends ReceiveController {
   /// As partes com que a venda foi gravada.
   List<CounterPayment> salePayments = const [];
 
+  /// A loja emite nota fiscal: "Venda recebida" oferece "Imprimir nota
+  /// fiscal" (a venda é gravada sem nota e vira fiscal só a pedido).
+  bool get fiscalAvailable => sale != null && (counter.context?.fiscalActive ?? false);
+
+  /// A NFC-e desta venda, depois de emitida.
+  FiscalNote? fiscalNote;
+  bool issuingFiscal = false;
+
+  /// Por que a nota não saiu (motivo da SEFAZ ou falha de rede).
+  String? fiscalError;
+
+  /// Emite a NFC-e da venda (ou devolve a já emitida: tocar de novo imprime a
+  /// MESMA nota, nunca emite outra). `null` = não saiu; ver [fiscalError].
+  Future<FiscalNote?> issueFiscal() async {
+    final s = sale;
+    if (s == null || issuingFiscal) return null;
+    final ready = fiscalNote;
+    if (ready != null) return ready;
+    issuingFiscal = true;
+    fiscalError = null;
+    changed();
+    try {
+      fiscalNote = await counter.issueFiscal(s.orderId, idempotencyKey: 'fiscal-${s.orderId}');
+    } on ApiException catch (e) {
+      fiscalError = e.isTransient
+          ? 'Sem resposta do servidor. Verifique a conexão e toque de novo: a nota não é emitida duas vezes.'
+          : e.message;
+    } finally {
+      issuingFiscal = false;
+      changed();
+    }
+    return fiscalNote;
+  }
+
   /// Quanto o servidor gravou a MENOS que a soma do cardápio (positivo =
   /// desconto; negativo = acréscimo). O cardápio do app traz o preço de
   /// cadastro, mas o servidor recalcula a venda com promoções e tabelas de

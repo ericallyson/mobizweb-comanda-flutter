@@ -1011,18 +1011,77 @@ class CashDetail {
 // ── Balcão ───────────────────────────────────────────────────────────────────
 
 class CounterContext {
-  const CounterContext({this.enabled = false, this.canSell = false, this.methods = const [], this.cashOpen = false});
+  const CounterContext({
+    this.enabled = false,
+    this.canSell = false,
+    this.methods = const [],
+    this.cashOpen = false,
+    this.fiscalActive = false,
+  });
   final bool enabled;
   final bool canSell;
   final List<PaymentMethodOption> methods;
   final bool cashOpen;
+
+  /// A loja tem emissão fiscal ativa: a venda sai sem nota e "Venda recebida"
+  /// oferece "Imprimir nota fiscal". Servidor antigo não informa (`false`).
+  final bool fiscalActive;
 
   factory CounterContext.fromJson(Json j) => CounterContext(
     enabled: asBool(j['enabled']),
     canSell: asBool(asMap(j['permissions'])['sell']),
     methods: asList(j['payment_methods']).map(PaymentMethodOption.fromJson).toList(),
     cashOpen: j['cash_session'] is Map,
+    fiscalActive: asBool(asMap(j['fiscal'])['active']),
   );
+}
+
+/// Uma linha do DANFE NFC-e, já composta pelo servidor na largura do aparelho.
+class DanfeLine {
+  const DanfeLine(this.text, {this.center = false, this.bold = false, this.big = false, this.qr = false});
+  final String text;
+  final bool center;
+  final bool bold;
+  final bool big;
+
+  /// A linha é o QR-Code de consulta: [text] é o conteúdo do QR.
+  final bool qr;
+
+  factory DanfeLine.fromJson(Json j) => DanfeLine(
+    asString(j['text']),
+    center: asString(j['align']) == 'center',
+    bold: asBool(j['bold']),
+    big: asBool(j['big']),
+    qr: asBool(j['qr']),
+  );
+}
+
+/// A NFC-e de uma venda de balcão (`POST /counter/orders/{id}/fiscal`) com o
+/// DANFE pronto para a impressora da maquininha.
+class FiscalNote {
+  const FiscalNote({this.number, this.series, this.accessKey, this.contingency = false, this.columns = 32, this.lines = const []});
+  final int? number;
+  final int? series;
+  final String? accessKey;
+  final bool contingency;
+
+  /// Largura em colunas com que o servidor compôs as linhas.
+  final int columns;
+  final List<DanfeLine> lines;
+
+  factory FiscalNote.fromJson(Json j) {
+    final n = asMap(j['nfce']);
+    final d = asMap(j['danfe']);
+    final columns = asInt(d['columns']);
+    return FiscalNote(
+      number: asIntOrNull(n['number']),
+      series: asIntOrNull(n['series']),
+      accessKey: asStringOrNull(n['access_key']),
+      contingency: asBool(n['is_contingency']),
+      columns: columns > 0 ? columns : 32,
+      lines: asList(d['lines']).map(DanfeLine.fromJson).toList(),
+    );
+  }
 }
 
 class CounterSaleResult {

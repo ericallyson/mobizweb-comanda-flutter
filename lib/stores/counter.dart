@@ -60,11 +60,20 @@ class CounterStore extends ChangeNotifier {
         'items': [for (final i in items) i.toPayload()],
         'payments': [for (final p in payments) p.toJson()],
         if (customerName != null && customerName.isNotEmpty) 'customer_name': customerName,
+        // Loja fiscal: a venda fecha SEM nota; a NFC-e sai só quando o
+        // operador toca em "Imprimir nota fiscal" ([issueFiscal]).
+        if (context?.fiscalActive ?? false) 'non_fiscal': true,
       },
       idempotencyKey: idempotencyKey,
     );
     return CounterSaleResult.fromJson(data);
   }
+
+  /// Emite a NFC-e de uma venda de balcão já concluída e devolve o DANFE.
+  /// Pedir de novo devolve a MESMA nota (segunda via), nunca emite outra.
+  /// Lança [ApiException]: nota rejeitada vem com o motivo da SEFAZ.
+  Future<FiscalNote> issueFiscal(String orderId, {required String idempotencyKey}) async =>
+      FiscalNote.fromJson(await _api.post('/counter/orders/$orderId/fiscal', idempotencyKey: idempotencyKey));
 
   void reset() {
     context = null;
