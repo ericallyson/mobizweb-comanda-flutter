@@ -43,7 +43,7 @@ const _receipt = <String, dynamic>{
 
 List<String> _texts(List<PLine> lines) => [
   for (final l in lines)
-    if (l is PText) l.text else if (l is PRow) '${l.left} | ${l.right}',
+    if (l is PText) l.text else if (l is PFit) l.text else if (l is PRow) '${l.left} | ${l.right}',
 ];
 
 void main() {
@@ -270,7 +270,7 @@ void main() {
     test('uma ficha por unidade paga; item por peso sai em uma ficha só', () {
       expect(lines.whereType<PCut>().length, 4);
       expect(lines.whereType<PBarcode>().length, 4);
-      final names = lines.whereType<PText>().where((t) => t.size == PSize.huge).map((t) => t.text).toList();
+      final names = lines.whereType<PFit>().map((t) => t.text).toList();
       expect(names, ['REFRIGERANTE LATA', 'REFRIGERANTE LATA', 'PICANHA', 'CERVEJA']);
       expect(_texts(lines), contains('0,35 kg'));
     });
@@ -279,8 +279,9 @@ void main() {
       final first = lines.takeWhile((l) => l is! PCut).toList();
       final texts = _texts(first);
       expect(texts, containsAllInOrder(['VENDA Nº 100029', '14/11/2026 - 20:32', 'REFRIGERANTE LATA', '100029001']));
-      final name = first.whereType<PText>().firstWhere((t) => t.text == 'REFRIGERANTE LATA');
-      expect((name.size, name.bold, name.align), (PSize.huge, true, PAlign.center));
+      // O nome do produto: em destaque, numa linha só.
+      final name = first.whereType<PFit>().single;
+      expect((name.text, name.bold), ('REFRIGERANTE LATA', true));
       final stamp = first.whereType<PText>().firstWhere((t) => t.text == '14/11/2026 - 20:32');
       expect(stamp.size, PSize.small);
       expect(lines.last, isA<PGap>());
@@ -300,9 +301,28 @@ void main() {
       final out = toStoneText(lines, barcodes: const ['AAA', null, 'CCC', 'DDD']);
       expect(out.where((p) => p.type == 'image').map((p) => p.imageBase64), ['AAA', 'CCC', 'DDD']);
       expect(out.where((p) => p.type == 'line' && p.content!.startsWith('- -')).length, 4);
-      // O nome grande sai no maior tamanho que a Stone aceita.
+      // Nome numa linha só: 17 letras não cabem no `big`, descem para `medium`.
       final name = out.firstWhere((p) => p.content == 'REFRIGERANTE LATA');
-      expect((name.size, name.align), ('big', 'center'));
+      expect((name.size, name.align), ('medium', 'center'));
+      expect(out.firstWhere((p) => p.content == 'CERVEJA').size, 'big');
+    });
+
+    test('nome do produto sempre em uma linha: diminui a letra e, no limite, corta', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      int height(List<int> png) => (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
+      Future<int> nameHeight(String name) async => height((await renderReceiptPng([PFit(name)])).single);
+
+      // A linha nunca passa da altura de UMA linha no tamanho máximo (40 × 1,25).
+      for (final name in ['CERVEJA', 'REFRIGERANTE LATA', 'HAMBÚRGUER ARTESANAL DUPLO COM CHEDDAR E BACON']) {
+        expect(await nameHeight(name), lessThanOrEqualTo(50), reason: name);
+      }
+      // Nome curto usa a letra maior; nome longo, uma menor.
+      expect(await nameHeight('REFRIGERANTE LATA DE 350 ML'), lessThan(await nameHeight('CERVEJA')));
+
+      final long = toStoneText(const [PFit('HAMBÚRGUER ARTESANAL DUPLO COM CHEDDAR E BACON ESPECIAL')]).single;
+      expect(long.size, 'small');
+      expect(long.content!.length, 48);
+      expect(long.content, endsWith('...'));
     });
 
     test('imagem: nenhuma ficha é partida entre duas imagens', () async {

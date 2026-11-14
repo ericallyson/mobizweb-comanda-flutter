@@ -6,9 +6,7 @@ library;
 import '../core/format.dart';
 import '../models/models.dart';
 
-/// `huge` só existe na impressão por imagem (nome do produto na ficha); no modo
-/// texto sai como `big`, o maior tamanho que a impressora da Stone aceita.
-enum PSize { small, medium, big, huge }
+enum PSize { small, medium, big }
 
 enum PAlign { left, center, right }
 
@@ -40,6 +38,18 @@ class PDivider extends PLine {
 class PGap extends PLine {
   const PGap([this.px = 12]);
   final double px;
+}
+
+/// Texto em destaque que SEMPRE ocupa uma linha só (nome do produto na
+/// ficha): sai no maior tamanho que couber na largura do papel, entre
+/// [maxSize] e [minSize] pontos; se nem no menor couber, é cortado com
+/// reticências. No modo texto escolhe o tamanho da Stone pelo comprimento.
+class PFit extends PLine {
+  const PFit(this.text, {this.maxSize = 40, this.minSize = 22, this.bold = true});
+  final String text;
+  final double maxSize;
+  final double minSize;
+  final bool bold;
 }
 
 /// Código de barras Code 128 centralizado. No modo imagem é desenhado; no
@@ -319,7 +329,7 @@ List<PLine> counterTickets({int? number, required List<CartItem> items, DateTime
         PText(number != null ? 'VENDA Nº $number' : 'VENDA BALCÃO', align: PAlign.center, bold: true),
         PText(stamp, align: PAlign.center, size: PSize.small),
         const PGap(6),
-        PText(item.product.name.toUpperCase(), align: PAlign.center, size: PSize.huge, bold: true),
+        PFit(item.product.name.toUpperCase()),
         if (!whole)
           PText(
             '${qty(item.quantity)} ${item.product.unitOfMeasure ?? ''}'.trim(),

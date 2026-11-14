@@ -14,15 +14,15 @@ double _fontSize(PSize s) => switch (s) {
   PSize.small => 20,
   PSize.medium => 24,
   PSize.big => 32,
-  PSize.huge => 44,
 };
-
-/// Nome do tamanho no deeplink da Stone (que só conhece três).
-String _stoneSize(PSize s) => s == PSize.huge ? 'big' : s.name;
 
 /// Colunas por linha no modo texto. A Stone não documenta esse número; estes
 /// valores são os usuais de térmica 58 mm (fonte A = 32, fonte B = 48).
 int textColumns(PSize s) => s == PSize.small ? 48 : 32;
+
+/// Quantas letras cabem em uma linha no tamanho `big` do modo texto (largura
+/// dobrada). Valor conservador: acima disso o nome desce para `medium`.
+const bigTextColumns = 16;
 
 // ── Modo texto ───────────────────────────────────────────────────────────────
 
@@ -38,20 +38,28 @@ List<StonePrintable> toStoneText(List<PLine> lines, {List<String?> barcodes = co
   for (final l in lines) {
     switch (l) {
       case PText():
-        out.add(StonePrintable.text(l.text, align: l.align.name, size: _stoneSize(l.size)));
+        out.add(StonePrintable.text(l.text, align: l.align.name, size: l.size.name));
       case PRow():
         final cols = textColumns(l.size);
         final gap = cols - l.left.length - l.right.length;
         if (gap >= 1) {
-          out.add(StonePrintable.text('${l.left}${' ' * gap}${l.right}', size: _stoneSize(l.size)));
+          out.add(StonePrintable.text('${l.left}${' ' * gap}${l.right}', size: l.size.name));
         } else {
-          out.add(StonePrintable.text(l.left, size: _stoneSize(l.size)));
-          if (l.right.isNotEmpty) out.add(StonePrintable.text(l.right, align: 'right', size: _stoneSize(l.size)));
+          out.add(StonePrintable.text(l.left, size: l.size.name));
+          if (l.right.isNotEmpty) out.add(StonePrintable.text(l.right, align: 'right', size: l.size.name));
         }
       case PDivider():
         out.add(StonePrintable.line('-' * 32));
       case PGap():
         out.add(const StonePrintable.line(' '));
+      case PFit():
+        // Uma linha só: o maior tamanho da Stone em que o texto cabe.
+        final size = l.text.length <= bigTextColumns
+            ? PSize.big
+            : (l.text.length <= textColumns(PSize.medium) ? PSize.medium : PSize.small);
+        final max = textColumns(size);
+        final text = l.text.length <= max ? l.text : '${l.text.substring(0, max - 3)}...';
+        out.add(StonePrintable.text(text, align: 'center', size: size.name));
       case PBarcode():
         final image = barcode < barcodes.length ? barcodes[barcode] : null;
         barcode++;
@@ -114,6 +122,32 @@ TextPainter _tp(String text, PSize size, bool bold, double maxWidth, [TextAlign 
   return tp;
 }
 
+/// O texto de [PFit] em UMA linha: maior tamanho entre `maxSize` e `minSize`
+/// que cabe em [width]; no menor, corta com reticências.
+TextPainter _fit(PFit l, double width) {
+  TextPainter build(double size, {bool clip = false}) => TextPainter(
+    text: TextSpan(
+      text: l.text,
+      style: TextStyle(
+        color: _ink,
+        fontSize: size,
+        fontWeight: l.bold ? FontWeight.w800 : FontWeight.w500,
+        height: 1.25,
+      ),
+    ),
+    maxLines: 1,
+    ellipsis: clip ? '…' : null,
+    textDirection: TextDirection.ltr,
+  )..layout(maxWidth: clip ? width : double.infinity);
+
+  for (var size = l.maxSize; size >= l.minSize; size -= 2) {
+    final tp = build(size);
+    if (tp.width <= width) return tp;
+    tp.dispose();
+  }
+  return build(l.minSize, clip: true);
+}
+
 List<_Block> _layout(List<PLine> lines, double width) {
   final blocks = <_Block>[];
   for (final l in lines) {
@@ -161,6 +195,9 @@ List<_Block> _layout(List<PLine> lines, double width) {
         );
       case PGap():
         blocks.add(_Block(l.px, (_, _) {}));
+      case PFit():
+        final tp = _fit(l, width);
+        blocks.add(_Block(tp.height, (c, y) => tp.paint(c, ui.Offset((width - tp.width) / 2, y))));
       case PBarcode():
         final modules = code128Modules(l.data);
         final unit = code128ModuleWidth(l.data, width.toInt());
